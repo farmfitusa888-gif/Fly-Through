@@ -3,3 +3,4 @@
 requests>=2.31
 # Development
 pytest>=8.0
+segno>=1.6

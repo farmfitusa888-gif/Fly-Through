@@ -158,3 +158,53 @@ def test_assembly_normalises_mixed_inputs(tmp_path):
          "-show_entries", "stream=width,height", "-of", "csv=p=0", str(vert)],
         capture_output=True, text=True, check=True).stdout.strip()
     assert out.startswith("1080,1920")
+
+
+# --- compliance -------------------------------------------------------------
+
+def test_disclosure_pack_is_complete(photos, tmp_path):
+    from flythrough.compliance import build_pack
+    plan = build_plan(photos, listing="1420 Cedar Ridge Rd", max_seconds=30)
+    url = "https://flythrough.co/o/test"
+    pack = build_pack(
+        plan.listing,
+        [{"path": p.path, "room_key": p.room_key} for p in plan.photos],
+        tmp_path, url=url, slug="test",
+    )
+    assert pack.card.exists() and probe_duration(pack.card) > 1.5
+    assert pack.qr.exists() and pack.qr.stat().st_size > 0
+    assert pack.page.exists()
+
+    page = pack.page.read_text()
+    assert "AI-generated video" in page
+    assert "not drone footage" in page
+    assert "10140.8" in page          # the statute the page exists to satisfy
+    assert "Article 12" in page
+
+    # The link to the originals is the operative AB 723 requirement; it must
+    # appear in every channel the video reaches.
+    for text in (pack.caption, pack.caption_short):
+        assert url in text
+        assert "AI" in text
+    assert "not drone" in pack.caption
+
+
+def test_disclosure_page_lists_every_source_photo(photos, tmp_path):
+    from flythrough.compliance import build_pack
+    plan = build_plan(photos, listing="X")
+    pack = build_pack(
+        plan.listing,
+        [{"path": p.path, "room_key": p.room_key} for p in plan.photos],
+        tmp_path, url="https://x.co/o/x", slug="x",
+    )
+    page = pack.page.read_text()
+    for p in plan.photos:
+        assert Path(p.path).name in page, f"{p.path} missing from disclosure page"
+
+
+def test_drawtext_escaping_survives_hostile_input(tmp_path):
+    """A URL with a colon must not break the ffmpeg filter graph."""
+    from flythrough.compliance import make_card
+    card = make_card("https://flythrough.co/o/100%-off_it's-here", tmp_path / "c.mp4",
+                     seconds=1.0)
+    assert card.exists() and probe_duration(card) == pytest.approx(1.0, abs=0.2)
