@@ -1,0 +1,5 @@
+# Runtime: the pipeline itself uses only the standard library plus ffmpeg on PATH.
+# requests is needed only by the QueueAdapter when submitting to an HTTP provider.
+requests>=2.31
+# Development
+pytest>=8.0

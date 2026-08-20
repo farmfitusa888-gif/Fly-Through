@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+plans/
+manifests/
+delivery/
+work/
+*.mp4
+!samples/**/*.mp4
+.env
