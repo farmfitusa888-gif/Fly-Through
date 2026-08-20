@@ -226,5 +226,100 @@ def report() -> None:
     print(line)
 
 
+
+
+# ---------------------------------------------------------------------------
+# Monthly P&L scenarios
+# ---------------------------------------------------------------------------
+
+# ASSUMPTION: fixed monthly costs to run this business at small scale.
+FIXED_MONTHLY = {
+    "render subscription": 30.00,   # ASSUMPTION: a credit plan sized for volume
+    "hosting + domain": 12.00,      # ASSUMPTION: static hosting for originals pages
+    "music licence": 15.00,         # ASSUMPTION: a stock-music subscription
+    "accounting/admin": 25.00,      # ASSUMPTION
+}
+
+
+@dataclass(frozen=True)
+class Scenario:
+    name: str
+    one_off: int          # Listing Pro jobs sold individually
+    retainers: int        # monthly retainer clients
+    partner_jobs: int     # jobs via a photographer partner at wholesale
+
+
+PARTNER_PRICE = 199.0     # what a reseller partner pays us per job
+
+SCENARIOS = (
+    Scenario("Month 1 - proving it",      3,  1,  0),
+    Scenario("Month 2 - repeatable",      8,  2,  5),
+    Scenario("Month 3 - scaling",        10,  5, 15),
+    Scenario("Steady state",             10,  8, 30),
+)
+
+
+def pnl(s: Scenario) -> dict:
+    t = TIERS[1]
+    unit = cogs(t.runtime_s, t.shots, t.price)
+    jobs = s.one_off + s.retainers * RETAINER_LISTINGS + s.partner_jobs
+
+    revenue = (
+        s.one_off * t.price
+        + s.retainers * RETAINER_PRICE
+        + s.partner_jobs * PARTNER_PRICE
+    )
+    render = jobs * unit["render"]
+    fees = (
+        s.one_off * (t.price * PAYMENT_PCT + PAYMENT_FLAT)
+        + s.retainers * (RETAINER_PRICE * PAYMENT_PCT + PAYMENT_FLAT)
+        + s.partner_jobs * (PARTNER_PRICE * PAYMENT_PCT + PAYMENT_FLAT)
+    )
+    hosting = jobs * HOSTING_PER_JOB
+    fixed = sum(FIXED_MONTHLY.values())
+    hours = jobs * MINUTES_PER_JOB / 60
+
+    profit = revenue - render - fees - hosting - fixed
+    return {
+        "name": s.name, "jobs": jobs, "revenue": revenue,
+        "render": render, "fees": fees, "hosting": hosting, "fixed": fixed,
+        "profit": profit, "hours": hours,
+        "per_hour": profit / hours if hours else 0.0,
+        "recurring_share": (s.retainers * RETAINER_PRICE) / revenue if revenue else 0.0,
+    }
+
+
+def breakeven_jobs() -> float:
+    """Listing Pro jobs per month needed to cover fixed costs."""
+    t = TIERS[1]
+    gp = t.price - cogs(t.runtime_s, t.shots, t.price)["cash_cogs"]
+    return sum(FIXED_MONTHLY.values()) / gp
+
+
+def pnl_report() -> None:
+    line = "-" * 78
+    print()
+    print(line)
+    print("MONTHLY P&L SCENARIOS")
+    print(line)
+    print(f"Fixed costs {_money(sum(FIXED_MONTHLY.values()))}/mo "
+          f"({', '.join(FIXED_MONTHLY)})  [ASSUMPTION]")
+    print(f"Break-even: {breakeven_jobs():.2f} Listing Pro jobs per month.")
+    print()
+    print(f"{'Scenario':<24}{'Jobs':>6}{'Revenue':>11}{'Costs':>10}"
+          f"{'Profit':>11}{'Hrs':>7}{'$/hr':>9}{'Recur':>8}")
+    for s in SCENARIOS:
+        p = pnl(s)
+        costs = p["render"] + p["fees"] + p["hosting"] + p["fixed"]
+        print(f"{p['name']:<24}{p['jobs']:>6}{_money(p['revenue']):>11}"
+              f"{_money(costs):>10}{_money(p['profit']):>11}{p['hours']:>7.1f}"
+              f"{_money(p['per_hour']):>9}{p['recurring_share']:>8.0%}")
+    print()
+    print("  Recur = share of revenue from retainers. Watch this column: it is")
+    print("  the difference between a business and a sequence of freelance gigs.")
+    print(line)
+
+
 if __name__ == "__main__":
     report()
+    pnl_report()
