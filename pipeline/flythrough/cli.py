@@ -106,7 +106,7 @@ def cmd_assemble(a: argparse.Namespace) -> int:
     sequence += clips
 
     d = deliver(sequence, outdir, slug=slug, crossfade=a.crossfade, fps=a.fps,
-                music=a.music, make_vertical=not a.no_vertical)
+                music=a.music, make_vertical=not a.no_vertical, trim=not a.no_trim)
     (outdir / "_card.mp4").unlink(missing_ok=True)
 
     print(f"  master    {d.master.name}  ({d.duration:.1f}s)  [archive, CRF 18]")
@@ -160,6 +160,10 @@ def main(argv: list[str] | None = None) -> int:
                           "card, the QR and the MLS caption")
     asm.add_argument("--music")
     asm.add_argument("--no-vertical", action="store_true")
+    asm.add_argument("--no-trim", action="store_true",
+                     help="skip stall trimming. Only correct if the clips were "
+                          "already trimmed -- untrimmed anchored clips compile to "
+                          "roughly 40%% frozen frames and read as a slideshow.")
     asm.set_defaults(fn=cmd_assemble)
 
     a = p.parse_args(argv)

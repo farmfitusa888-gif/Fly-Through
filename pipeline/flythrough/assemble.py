@@ -71,13 +71,20 @@ def trim_stalls(
     src: str | Path,
     out: str | Path,
     *,
-    threshold: float = 0.35,
-    min_trim: float = 0.08,
-    max_trim_fraction: float = 0.40,
+    threshold: float = 0.08,
+    min_trim: float = 0.0,
+    max_trim_fraction: float = 0.32,
     keep_min: float = 0.60,
     fps: int = 30,
 ) -> Path:
-    """Cut the dead frames off both ends of an anchored clip.
+    """Cut the FROZEN frames off both ends of an anchored clip.
+
+    Cuts the held frame only, NOT the deceleration ramp. The ease-in and ease-out
+    either side of an anchor is natural camera movement and reads as cinematic;
+    removing it makes the whole cut feel rushed, which an operator correctly
+    called out after an over-aggressive first pass took 26.3s down to 15.0s. The
+    gate is therefore deliberately low -- it should catch a held image, and
+    nothing that is still moving.
 
     THE PROBLEM THIS SOLVES, measured on a delivered tour: every anchored clip
     stalls at both ends. Middle-of-clip motion averaged ~13 units of mean pixel
@@ -96,7 +103,14 @@ def trim_stalls(
     """
     src, out = Path(src), Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    prof = _motion_profile(src)
+    raw = _motion_profile(src)
+    # Smooth before gating. The raw profile carries isolated single-frame spikes
+    # inside an otherwise dead tail (measured: 1.16 and 0.69 among frames
+    # averaging 0.2), and an unsmoothed gate latches onto those and refuses to
+    # trim anything.
+    k = 5
+    prof = [sum(raw[max(0, i - k // 2): i + k // 2 + 1]) /
+            len(raw[max(0, i - k // 2): i + k // 2 + 1]) for i in range(len(raw))] if raw else raw
     dur = probe_duration(src)
     if not prof:
         shutil.copy2(src, out)
@@ -109,8 +123,27 @@ def trim_stalls(
     sustained = ordered[int(len(ordered) * 0.7)] or 0.0
     gate = sustained * threshold
 
-    first = next((i for i, v in enumerate(prof) if v > gate), 0)
-    last = next((i for i in range(len(prof) - 1, -1, -1) if prof[i] > gate), len(prof) - 1)
+    # Require SUSTAINED motion, not a single moving frame. A clip can start
+    # moving, stall again for half a second, then get going -- measured on a real
+    # clip with a 0.53s dead patch seventeen frames in. Trimming to the first
+    # moving frame leaves that patch inside the cut, where no crossfade can reach
+    # it, and it reads as a pause in the middle of the shot.
+    need = max(3, int(0.15 * fps))
+
+    def sustained_from(indices) -> int:
+        run = 0
+        for i in indices:
+            if prof[i] > gate:
+                run += 1
+                if run >= need:
+                    return i
+            else:
+                run = 0
+        return indices[0] if indices else 0
+
+    fwd = list(range(len(prof)))
+    first = max(0, sustained_from(fwd) - need + 1)
+    last = min(len(prof) - 1, sustained_from(list(reversed(fwd))) + need - 1)
 
     # The stall is systematic -- it appeared on both ends of every clip measured --
     # so a small floor is applied even when the gate does not fire. Without it a
@@ -280,15 +313,28 @@ def deliver(
     outdir: str | Path,
     *,
     slug: str,
-    crossfade: float = 0.4,
-    fps: int = 24,
+    crossfade: float = 0.2,
+    fps: int = 30,
     music: str | Path | None = None,
     make_vertical: bool = True,
     make_thumb: bool = True,
+    trim: bool = True,
 ) -> Deliverables:
-    """Produce the full delivery set from rendered shot clips."""
+    """Produce the full delivery set from rendered shot clips.
+
+    Stall trimming is ON by default and is not an optional polish step. Anchored
+    clips hold their end frame; a compilation of untrimmed clips measured 43.8%
+    frozen frames and read as a slideshow rather than a moving camera. Passing
+    trim=False is only correct when the clips have already been trimmed.
+    """
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
+
+    if trim:
+        work = outdir / "_trimmed"
+        work.mkdir(exist_ok=True)
+        clips = [trim_stalls(c, work / f"{i:02d}_{Path(c).stem}.mp4")
+                 for i, c in enumerate(clips)]
 
     master = concat(clips, outdir / f"{slug}_master_16x9.mp4",
                     crossfade=crossfade, fps=fps)
