@@ -67,6 +67,11 @@ def _motion_profile(path: str | Path, w: int = 96, h: int = 54) -> list[float]:
             for i in range(len(fr) - 1)]
 
 
+# A frame this close to its predecessor is held, not moving. Calibrated, not
+# guessed: see the note inside trim_stalls.
+STILL: float = 0.05
+
+
 def trim_stalls(
     src: str | Path,
     out: str | Path,
@@ -122,8 +127,22 @@ def trim_stalls(
     # never despiked.
     prof = list(raw)
 
+    # The gate is relative to how hard THIS clip moves, so grainy or noisy
+    # footage -- where even a held frame measures something -- still resolves.
+    # But relative alone breaks on a high-dynamic-range beat: a 2s hype cut that
+    # spikes to 47 in the middle puts its 70th percentile at ~20, and 4% of that
+    # is 0.82 -- above the 0.10-0.35 that ordinary DECELERATING footage reads.
+    # Four Ferrari beats with no frozen frame at all lost 1.8s between them that
+    # way, which is exactly the "you sped the whole thing up" failure again.
+    #
+    # So cap it. Measured against a synthesised freeze (last frame cloned for
+    # 0.5s) on this same footage, genuinely held frames read 0.0015-0.012, while
+    # the slowest real movement anywhere in these clips reads 0.100. STILL is set
+    # between those two populations, an order of magnitude clear of both.
+    # min() keeps whichever gate is stricter, so a low-motion clip still gets the
+    # tighter relative one and nothing above STILL is ever called frozen.
     sustained = sorted(prof)[int(len(prof) * 0.7)] or 0.0
-    gate = sustained * threshold
+    gate = min(sustained * threshold, STILL)
     need = max(4, int(min_run * fps))
 
     for i in range(1, len(prof) - 1):

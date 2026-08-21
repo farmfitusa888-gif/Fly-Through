@@ -6,11 +6,14 @@ drifts from the verified rate card.
 """
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+FFMPEG_BIN = shutil.which("ffmpeg") or "ffmpeg"
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -877,3 +880,47 @@ def test_car_ingest_matches_a_renamed_file_by_id_prefix(tmp_path):
         assert found is not None and found.name.startswith(beat["id"] + "-")
     finally:
         build.SEARCH = (root / "samples" / "cars" / "raw", root / "samples" / "inbox")
+
+
+def _moving_clip(path: Path, seconds: float = 2.0) -> Path:
+    """Footage that decelerates hard: fast in the middle, slow at the edges.
+    That shape is what broke relative-only gating."""
+    subprocess.run(
+        [FFMPEG_BIN, "-f", "lavfi", "-i",
+         f"testsrc2=s=640x360:d={seconds}:r=30",
+         "-vf", "zoompan=z='min(zoom+0.004,1.4)':d=1:s=640x360,"
+                "scale=640:360",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast",
+         str(path), "-y", "-loglevel", "error"], check=True)
+    return path
+
+
+def test_trim_gate_is_capped_in_absolute_terms(tmp_path):
+    """A high-dynamic-range beat -- a 2s hype cut spiking to ~47 in the middle --
+    puts its 70th percentile around 20, so a purely relative gate of 4% lands at
+    0.82. Ordinary decelerating footage reads 0.10-0.35, well UNDER that, so
+    every edge looked frozen and four clean Ferrari beats lost 1.8s between them.
+    Genuinely held frames measure 0.0015-0.012. The cap must sit between."""
+    from flythrough.assemble import STILL
+    assert 0.012 < STILL < 0.10, (
+        f"STILL={STILL} no longer separates held frames from slow real motion")
+
+
+def test_trim_leaves_a_hype_beat_with_no_freeze_alone(tmp_path):
+    """The regression itself: source with a genuine frozen tail must lose it,
+    and the same source without one must come back byte-for-byte in duration."""
+    from flythrough.assemble import probe_duration, trim_stalls
+    clean = _moving_clip(tmp_path / "clean.mp4")
+    out = trim_stalls(clean, tmp_path / "clean_out.mp4")
+    assert probe_duration(out) == pytest.approx(probe_duration(clean), abs=0.05), (
+        "trimmed a clip that has no frozen edge")
+
+    held = tmp_path / "held.mp4"
+    subprocess.run(
+        [FFMPEG_BIN, "-i", str(clean), "-vf",
+         "tpad=stop_mode=clone:stop_duration=0.5",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast",
+         str(held), "-y", "-loglevel", "error"], check=True)
+    trimmed = trim_stalls(held, tmp_path / "held_out.mp4")
+    removed = probe_duration(held) - probe_duration(trimmed)
+    assert 0.35 < removed < 0.75, f"removed {removed:.2f}s of a 0.5s clone"

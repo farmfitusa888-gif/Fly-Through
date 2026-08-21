@@ -24,6 +24,7 @@ see business/07-compliance.md -- and compliance.check_placement enforces that
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import sys
 import urllib.request
@@ -37,14 +38,19 @@ from flythrough.assemble import deliver, probe_duration       # noqa: E402
 from flythrough.compliance import check_placement              # noqa: E402
 
 MANIFEST = json.loads((HERE / "manifest.json").read_text())
-SEARCH = (HERE / "raw", ROOT / "samples" / "inbox")
+SEARCH = (HERE / "raw", ROOT / "samples" / "inbox", ROOT / "samples")
+VIDEO_EXT = {".mp4", ".mov", ".webm", ".m4v"}
 
 
 def find_local(beat: dict) -> Path | None:
-    """Match on the OpenArt id prefix, not the full filename -- browsers and
-    unzip tools both like to append ' (1)' and OpenArt's own names are long
-    enough that people rename them."""
-    stem = beat["id"] + "-"
+    """Match the OpenArt id as a whole token anywhere in the filename.
+
+    Not a prefix match: the real upload arrived as "openart-36199589-metadata_
+    user_...mp4", so the id sat in the middle. Not a substring match either --
+    id "3885864" is a substring of nothing here today, but ids are numeric and
+    a bare `in` test is one unlucky render away from matching the wrong clip.
+    Splitting on non-digits and comparing whole tokens is exact."""
+    want = beat["id"]
     for folder in SEARCH:
         if not folder.is_dir():
             continue
@@ -52,8 +58,9 @@ def find_local(beat: dict) -> Path | None:
         if exact.is_file():
             return exact
         for p in sorted(folder.iterdir()):
-            if p.is_file() and p.name.startswith(stem):
-                return p
+            if p.is_file() and p.suffix.lower() in VIDEO_EXT:
+                if want in re.split(r"\D+", p.stem):
+                    return p
     return None
 
 
@@ -85,14 +92,39 @@ def locate(beat: dict, work: Path) -> Path:
     return dest
 
 
-def build_one(slug: str) -> None:
+def longest_run(film: dict) -> list[dict]:
+    """The longest stretch of consecutive beats actually on disk. Anchoring only
+    holds across a contiguous run -- beats 1,2,3,7 is not a 4-beat film, it is a
+    3-beat film with an orphan, and cutting straight from 3 to 7 puts a jump in
+    the middle of a car that is supposed to look continuous."""
+    runs, cur = [], []
+    for b in film["beats"]:
+        if find_local(b):
+            cur.append(b)
+        elif cur:
+            runs.append(cur); cur = []
+    if cur:
+        runs.append(cur)
+    return max(runs, key=len) if runs else []
+
+
+def build_one(slug: str, *, partial: bool = False) -> None:
     film = MANIFEST["films"][slug]
     check_placement("vehicles", film["disclosure"])   # refuses a bad pairing
     work, out = HERE / "work" / slug, HERE / "delivery"
     print(f"\n{film['title']}  --  {film['brief']}")
-    clips = [locate(b, work) for b in film["beats"]]
+    beats = film["beats"]
+    if partial:
+        beats = longest_run(film)
+        if not beats:
+            print("  nothing on disk yet"); return
+        if len(beats) < len(film["beats"]):
+            slug = f"{slug}-partial"
+            print(f"  PARTIAL: beats {beats[0]['n']}-{beats[-1]['n']} of "
+                  f"{len(film['beats'])} -- not the finished ad")
+    clips = [locate(b, work) for b in beats]
 
-    planned = sum(b["seconds"] for b in film["beats"])
+    planned = sum(b["seconds"] for b in beats)
     actual = sum(probe_duration(c) for c in clips)
     print(f"  {len(clips)} beats, {actual:.1f}s raw (planned {planned:.1f}s)")
 
@@ -105,18 +137,67 @@ def build_one(slug: str) -> None:
     print(f"  thumb    {d.thumbnail.name}")
 
 
+def status() -> int:
+    """What is here and what is not. Run this before build.py after any upload:
+    fifteen near-identical clips are very easy to be three short of."""
+    missing_any = False
+    for slug, film in MANIFEST["films"].items():
+        print(f"\n{film['title']}  ({len(film['beats'])} beats)")
+        for b in film["beats"]:
+            hit = find_local(b)
+            mark = "ok  " if hit else "MISS"
+            if not hit:
+                missing_any = True
+            src = hit.name if hit else b["file"]
+            print(f"  {mark} {b['n']:>2}  {b['from']:>22} -> {b['to']:<22} {src}")
+        have = [b for b in film["beats"] if find_local(b)]
+        runs, cur = [], []
+        for b in film["beats"]:
+            if find_local(b):
+                cur.append(b)
+            elif cur:
+                runs.append(cur); cur = []
+        if cur:
+            runs.append(cur)
+        best = max(runs, key=len) if runs else []
+        print(f"  -- {len(have)}/{len(film['beats'])} present; "
+              f"longest unbroken run {len(best)} beats"
+              + (f" ({best[0]['n']}-{best[-1]['n']}, "
+                 f"{sum(b['seconds'] for b in best):.1f}s)" if best else ""))
+
+    known = {b["id"] for f in MANIFEST["films"].values() for b in f["beats"]}
+    extra = []
+    for folder in SEARCH:
+        if not folder.is_dir():
+            continue
+        for p in sorted(folder.iterdir()):
+            if p.is_file() and p.suffix.lower() in VIDEO_EXT:
+                ids = set(re.split(r"\D+", p.stem))
+                if not (ids & known):
+                    extra.append(p)
+    if extra:
+        print(f"\nNot in the manifest ({len(extra)}):")
+        for p in extra:
+            print(f"  ?    {p.relative_to(ROOT)}")
+    return 1 if missing_any else 0
+
+
 def main(argv: list[str]) -> int:
     if shutil.which("ffmpeg") is None:
         print("ffmpeg is not on PATH.", file=sys.stderr)
         return 2
-    wanted = argv[1:] or list(MANIFEST["films"])
+    if argv[1:2] == ["status"]:
+        return status()
+    args = [a for a in argv[1:] if a != "--partial"]
+    partial = "--partial" in argv[1:]
+    wanted = args or list(MANIFEST["films"])
     for slug in wanted:
         if slug not in MANIFEST["films"]:
             print(f"unknown film {slug!r}; have "
                   f"{', '.join(MANIFEST['films'])}", file=sys.stderr)
             return 2
     for slug in wanted:
-        build_one(slug)
+        build_one(slug, partial=partial)
     return 0
 
 
