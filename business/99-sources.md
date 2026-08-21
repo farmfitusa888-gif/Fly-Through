@@ -17,6 +17,23 @@ Reproduce by re-running those tools.
 | Seedance 2.0 image2video, 720p + audio | 400cr @5s |
 | Models accepting start **and** end frame | Wan 2.7, Kling 3 Omni, Seedance 2.x, PixVerse V6 |
 | Account plan / balance at build time | Plus, 9,690 credits |
+| Nano Banana Pro 16:9 image | 2K = 2752x1536 @ 40cr; **4K = 5504x3072 @ 80cr** |
+| Image billing model | **Per output, not per job** (imageCount=4 quotes quantity=4, 160cr) |
+| Video billing model | **Per second, flat** — no batching discount exists |
+| Kling multiShot 15s (3 shots) | 525cr = same as 3 x 5s. Continuity feature, not a discount |
+
+### Verified cost lever — the 4K contact sheet
+
+A 4K render (5504x3072) sliced 2x2 yields four tiles of **2752x1536 — pixel-identical
+to a dedicated 2K render — for 80 credits instead of 160. A 50% saving with no
+resolution loss.** Confirmed by generating both and comparing reported dimensions.
+
+Applies only where **we** generate stills (demo reels, portfolio, style tests). In
+the live business the agent supplies photographs, so this is a production-cost
+tool, not a margin lever. Implemented in `pipeline/flythrough/contactsheet.py`.
+
+**It does not transfer to video.** Video bills per second at a flat rate, so a long
+render sliced into shots costs exactly what separate shots cost.
 
 ## `[MARKET]` — secondary sources, re-check before client-facing use
 

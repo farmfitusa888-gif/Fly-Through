@@ -208,3 +208,38 @@ def test_drawtext_escaping_survives_hostile_input(tmp_path):
     card = make_card("https://flythrough.co/o/100%-off_it's-here", tmp_path / "c.mp4",
                      seconds=1.0)
     assert card.exists() and probe_duration(card) == pytest.approx(1.0, abs=0.2)
+
+
+# --- contact sheet ----------------------------------------------------------
+
+def test_contact_sheet_economics_match_verified_pricing():
+    from flythrough.contactsheet import plan_sheet
+    p = plan_sheet("4K", 2, 2)
+    assert (p.tile_w, p.tile_h) == (2752, 1536)   # identical to a 2K render
+    assert p.sheet_credits == 80
+    assert p.separate_credits == 160
+    assert p.saving == 80 and p.saving_pct == 0.5
+
+
+def test_uneven_slice_is_refused():
+    from flythrough.contactsheet import plan_sheet
+    with pytest.raises(ValueError, match="does not divide evenly"):
+        plan_sheet("4K", 3, 3)
+
+
+def test_slice_produces_named_tiles_the_planner_can_read(tmp_path):
+    """Tiles must come out named so build_plan resolves their rooms directly."""
+    from flythrough.contactsheet import slice_sheet, probe_size
+    sheet = tmp_path / "sheet.png"
+    subprocess.run(
+        ["ffmpeg", "-f", "lavfi", "-i", "color=c=gray:s=5504x3072", "-frames:v", "1",
+         str(sheet), "-y", "-loglevel", "error"], check=True)
+
+    names = ["living", "kitchen", "primary-bedroom", "patio"]
+    tiles = slice_sheet(sheet, tmp_path / "tiles", rows=2, cols=2, names=names)
+    assert len(tiles) == 4
+    for t in tiles:
+        assert probe_size(t) == (2752, 1536)
+
+    plan = build_plan(tmp_path / "tiles", listing="Sheet House")
+    assert [p.room_key for p in plan.photos] == ["living", "kitchen", "primary_bed", "patio"]
