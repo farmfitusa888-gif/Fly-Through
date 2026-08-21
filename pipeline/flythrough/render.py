@@ -193,6 +193,42 @@ def write_manifest(plan: Plan, jobs: list[Job], out: str | Path, *, model: str, 
     return p
 
 
+# Providers cap concurrent generations. Hit on a real 15-beat batch: submitting
+# four at once succeeded, the next two were rejected with PARALLEL_LIMIT_EXCEEDED.
+# No credits are charged for a rejected submit, but an unguarded loop will burn
+# through a job list producing nothing.
+#
+# This matters commercially: a 50-unit dealer batch is roughly 350 beats. That is
+# a queue with backpressure, not a blast. Size MAX_PARALLEL from the provider's
+# actual limit and let submit_all drain it.
+MAX_PARALLEL = 4
+RETRY_AFTER_SECONDS = 60
+PARALLEL_ERRORS = ("PARALLEL_LIMIT_EXCEEDED", "too many generations")
+
+
+def is_parallel_limit(err: object) -> bool:
+    """Whether an error is backpressure rather than a real failure.
+
+    Backpressure means retry the same job later. A real failure means the job is
+    wrong and retrying just wastes another slot.
+    """
+    text = str(err).lower()
+    return any(m.lower() in text for m in PARALLEL_ERRORS)
+
+
+def done_early(ids: dict[int, str], poll) -> list[int]:
+    """Which submitted jobs have already finished, so a slot is free."""
+    out = []
+    for idx, jid in ids.items():
+        try:
+            status, _ = poll(jid)
+        except Exception:                    # noqa: BLE001
+            continue
+        if status in ("DONE", "FAILED"):
+            out.append(idx)
+    return out
+
+
 def submit_all(
     jobs: list[Job],
     submit: Callable[[Job], str],
@@ -207,7 +243,21 @@ def submit_all(
     is one of PENDING / DONE / FAILED. Failures are reported per shot and do not
     abort the batch -- a 12-shot job losing one shot is a re-roll, not a restart.
     """
-    ids = {j.shot_index: submit(j) for j in jobs}
+    # Submit with backpressure rather than all at once: the provider caps
+    # concurrency and rejects the overflow.
+    pending = list(jobs)
+    ids: dict[int, str] = {}
+    while pending:
+        j = pending[0]
+        try:
+            ids[j.shot_index] = submit(j)
+            pending.pop(0)
+        except Exception as exc:            # noqa: BLE001 - provider errors vary
+            if not is_parallel_limit(exc):
+                raise
+            time.sleep(RETRY_AFTER_SECONDS)
+        if len(ids) - len(done_early(ids, poll)) >= MAX_PARALLEL and pending:
+            time.sleep(interval)
     done: dict[int, str] = {}
     failed: dict[int, str] = {}
     deadline = time.monotonic() + timeout

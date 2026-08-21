@@ -1,0 +1,30 @@
+{
+  "_note": "What the landing page renders. Add entries as media lands; build_landing.py reads this and never hardcodes a file. Missing entries degrade to stills rather than breaking the page.",
+  "property": {
+    "ready": true,
+    "master": "media/property-tour.mp4",
+    "vertical": "media/property-vertical.mp4",
+    "seconds": 27.7,
+    "shots": 5,
+    "title": "1420 Cedar Ridge Rd",
+    "brief": "Luxury listing / tour tempo / golden hour"
+  },
+  "ferrari": {
+    "ready": false,
+    "waiting_on": "render approval (hype tempo, 8 beats, 16s) then clips sent back from OpenArt",
+    "title": "Rosso Corsa berlinetta",
+    "brief": "Exotic performance / hype tempo / showroom"
+  },
+  "silverado": {
+    "ready": false,
+    "waiting_on": "render approval (ad tempo, 7 beats, 15s) then clips sent back from OpenArt",
+    "title": "Silverado crew cab",
+    "brief": "Full-size pickup / ad tempo / lot daylight"
+  },
+  "product": {
+    "ready": false,
+    "waiting_on": "no product shoot yet",
+    "title": "Product motion",
+    "brief": "Product launch / hype tempo / studio"
+  }
+}

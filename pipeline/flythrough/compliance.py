@@ -72,6 +72,51 @@ CAPTION_SHORT = (
 )
 
 
+# How disclosure appears. This is a PLACEMENT choice, not a compliance choice --
+# the statute asks for "conspicuous" plus a link, not for a specific format, and
+# a 2.5-second black card at the head kills the opening of a film for no legal
+# gain over an equally visible mark.
+#
+#   "lead_card"  full-frame card BEFORE the footage. Maximum conspicuousness,
+#                worst creative outcome. Default only where a board demands it.
+#   "mark_end"   a small persistent corner mark for the whole runtime PLUS a
+#                full end card. Continuously visible, survives re-posting, and
+#                the film opens on the property. This is the sane default.
+#   "none"       no on-screen disclosure. Correct ONLY where no disclosure duty
+#                exists -- vehicle and product advertising, which fall under FTC
+#                truth-in-advertising rather than NAR Article 12 or AB 723.
+#                NEVER correct for real-estate listing media.
+PLACEMENT = ("lead_card", "mark_end", "none")
+
+# Which placement each vertical may use. Real estate cannot opt out; the duty is
+# NAR Article 12 nationally plus AB 723 in California, and it reaches the vendor.
+ALLOWED_PLACEMENT: dict[str, tuple[str, ...]] = {
+    "rooms": ("mark_end", "lead_card"),
+    "vehicles": ("none", "mark_end", "lead_card"),
+    "products": ("none", "mark_end", "lead_card"),
+}
+
+
+def check_placement(vertical: str, placement: str) -> str:
+    """Refuse a placement the vertical is not allowed to use.
+
+    Real-estate listing media cannot use "none". That is not a house style
+    preference -- an agent who posts undisclosed altered imagery is exposed under
+    Article 12 in every state, and under AB 723 so is the vendor who made it.
+    """
+    if placement not in PLACEMENT:
+        raise ValueError(f"unknown placement {placement!r}; choose from {PLACEMENT}")
+    allowed = ALLOWED_PLACEMENT.get(vertical, PLACEMENT)
+    if placement not in allowed:
+        raise ValueError(
+            f"{vertical} may not use placement {placement!r}. "
+            f"Allowed: {allowed}. Real-estate listing media carries a disclosure "
+            "duty under NAR Article 12 and, in California, AB 723 -- which reaches "
+            "the person acting on the broker's behalf, i.e. us."
+        )
+    return placement
+
+
 @dataclass
 class DisclosurePack:
     """Everything one job needs to be disclosed correctly."""
@@ -233,6 +278,67 @@ def make_page(
 </div>
 """
     out.write_text(doc)
+    return out
+
+
+def make_corner_mark(
+    text: str = "AI-generated camera motion",
+    *, width: int = 1920, height: int = 1080, seconds: float = 1.0, fps: int = 30,
+) -> list[str]:
+    """ffmpeg drawtext args for a small persistent corner mark.
+
+    Returned as a filter fragment rather than a rendered clip, because it must be
+    burned over the whole runtime rather than cut in.
+    """
+    size = max(18, round(height * 0.022))
+    pad = round(height * 0.028)
+    return [
+        f"drawtext=fontfile={FONT}:text='{_esc(text)}':"
+        f"fontcolor=white@0.72:fontsize={size}:"
+        f"box=1:boxcolor=black@0.34:boxborderw={round(size*0.45)}:"
+        f"x=w-tw-{pad}:y=h-th-{pad}"
+    ]
+
+
+def make_end_card(
+    url: str,
+    out: str | Path,
+    *,
+    seconds: float = 3.0,
+    width: int = 1920,
+    height: int = 1080,
+    fps: int = 30,
+) -> Path:
+    """Render the closing disclosure card.
+
+    Placed at the END so the film opens on the subject. Paired with the corner
+    mark, disclosure is visible for the entire runtime, which is a stronger
+    conspicuousness position than a head card a viewer can skip past.
+    """
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    body = _wrap(CARD_BODY, 58)
+    draws = [
+        f"drawtext=fontfile={FONT_BOLD}:text='{_esc(CARD_HEADLINE)}':"
+        f"fontcolor=white:fontsize=58:x=(w-tw)/2:y=h*0.32"
+    ]
+    for i, line in enumerate(body):
+        draws.append(
+            f"drawtext=fontfile={FONT}:text='{_esc(line)}':"
+            f"fontcolor=0xDDDDDD:fontsize=34:x=(w-tw)/2:y=h*0.46+{i * 48}"
+        )
+    draws.append(
+        f"drawtext=fontfile={FONT}:text='{_esc(CARD_CTA + ' ' + url)}':"
+        f"fontcolor=0x9AD5FF:fontsize=28:x=(w-tw)/2:y=h*0.72"
+    )
+    subprocess.run(
+        [FFMPEG, "-y", "-loglevel", "error",
+         "-f", "lavfi", "-i", f"color=c=0x101418:s={width}x{height}:d={seconds}:r={fps}",
+         "-vf", ",".join(draws),
+         "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+         "-pix_fmt", "yuv420p", str(out)],
+        check=True, capture_output=True, text=True,
+    )
     return out
 
 

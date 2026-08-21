@@ -109,12 +109,14 @@ EXOTIC = Brief(
     tempo="hype",
     style="showroom",
     argument="This object is a piece of engineering sculpture and you want to be seen in it.",
-    emphasis=("hero", "wheels", "rear", "infotainment"),
-    avoid=("odometer", "vin", "cargo", "undercarriage", "engine"),
+    # The engine is NOT excluded. A mid-engine exotic displays it under glass
+    # and it is a hero feature -- excluding it was a real brief error.
+    emphasis=("hero", "engine", "wheels", "rear", "infotainment"),
+    avoid=("odometer", "vin", "cargo", "undercarriage"),
     open_on="hero",
     close_on="hero",
     aspect="9:16",
-    max_beats=7,
+    max_beats=8,
 )
 
 TRUCK = Brief(
@@ -123,7 +125,8 @@ TRUCK = Brief(
     tempo="ad",
     style="lot",
     argument="This will do the work and it will be a nice place to sit while it does.",
-    emphasis=("hero", "cargo", "front_seats", "infotainment"),
+    # The bed is the single thing a truck buyer looks for. It leads.
+    emphasis=("hero", "cargo", "front_seats", "infotainment", "wheels"),
     avoid=("vin", "undercarriage"),
     open_on="hero",
     close_on="rear",

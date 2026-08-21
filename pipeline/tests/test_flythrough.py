@@ -635,3 +635,45 @@ def test_unknown_tempo_is_refused():
     from flythrough.moves import MOVES, at_tempo
     with pytest.raises(KeyError, match="unknown tempo"):
         at_tempo(MOVES["orbit_left"], "cinematic")
+
+
+# --- disclosure placement ---------------------------------------------------
+
+def test_real_estate_cannot_opt_out_of_disclosure():
+    """The duty is NAR Article 12 nationally plus AB 723 in California, and AB 723
+    reaches the person acting on the broker's behalf -- the vendor. 'none' is not
+    a house-style choice for listing media."""
+    from flythrough.compliance import check_placement
+    with pytest.raises(ValueError, match="may not use placement"):
+        check_placement("rooms", "none")
+    assert check_placement("rooms", "mark_end") == "mark_end"
+    assert check_placement("rooms", "lead_card") == "lead_card"
+
+
+@pytest.mark.parametrize("vertical", ["vehicles", "products"])
+def test_ad_verticals_may_run_clean(vertical):
+    """Vehicle and product advertising falls under FTC truth-in-advertising, which
+    requires the ad not misrepresent the product -- not that the tooling be
+    announced. No person in frame, so synthetic-performer rules do not bite."""
+    from flythrough.compliance import check_placement
+    assert check_placement(vertical, "none") == "none"
+
+
+def test_unknown_placement_is_refused():
+    from flythrough.compliance import check_placement
+    with pytest.raises(ValueError, match="unknown placement"):
+        check_placement("rooms", "subtle")
+
+
+def test_corner_mark_is_a_filter_not_a_clip():
+    """It must burn over the whole runtime, so it cannot be a clip to cut in."""
+    from flythrough.compliance import make_corner_mark
+    frag = make_corner_mark()
+    assert isinstance(frag, list) and frag
+    assert "drawtext" in frag[0] and "AI-generated" in frag[0]
+
+
+def test_end_card_renders(tmp_path):
+    from flythrough.compliance import make_end_card
+    c = make_end_card("https://iflythroughit.com/o/x", tmp_path / "e.mp4", seconds=2.0)
+    assert c.exists() and probe_duration(c) == pytest.approx(2.0, abs=0.2)
