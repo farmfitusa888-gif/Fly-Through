@@ -362,6 +362,60 @@ def _phrase(a: Room, b: Room, phrases: dict[str, str] | None = None) -> str:
     return f"Travelling from {names.get(a.key, 'the space')} to {names.get(b.key, 'the space')}."
 
 
+# ---------------------------------------------------------------------------
+# TEMPO -- how fast the cut moves. This is a brief decision, not a property of
+# the move, and getting it wrong is expensive in both directions.
+#
+# A property tour reads as expensive when it is calm: long takes, constant
+# velocity, no acceleration. The buyer is imagining living there.
+#
+# An advert for a performance object is the opposite. Short beats, energy in the
+# move, cuts that land on a detail and leave. A 6-second slow orbit of a supercar
+# is not restrained, it is boring -- and it costs 210 credits to be boring, where
+# three 2-second beats cost 210 and say three things.
+#
+# Tempo scales duration and rewrites the pacing clause. Everything else holds.
+# ---------------------------------------------------------------------------
+
+TEMPO: dict[str, dict] = {
+    "tour": {
+        "scale": 1.0,
+        "min_seconds": 5,
+        "pacing_override": None,          # keep each move's own calm pacing
+        "note": "Property tours, luxury real estate. Calm reads as expensive.",
+    },
+    "ad": {
+        "scale": 0.45,
+        "min_seconds": 2,
+        "pacing_override": "brisk, decisive, with a little acceleration into the move",
+        "note": "Performance vehicles, product launches. Energy, short beats.",
+    },
+    "hype": {
+        "scale": 0.3,
+        "min_seconds": 2,
+        "pacing_override": "fast and punchy, snapping into position",
+        "note": "Social-first cutdowns. Every beat lands and leaves.",
+    },
+}
+
+
+def at_tempo(move: Move, tempo: str = "tour") -> Move:
+    """Return the move re-timed and re-paced for a tempo.
+
+    Duration scales and floors at the tempo's minimum, because below about two
+    seconds an anchored shot cannot travel between its frames without lurching.
+    """
+    if tempo not in TEMPO:
+        raise KeyError(f"unknown tempo {tempo!r}; choose from {sorted(TEMPO)}")
+    t = TEMPO[tempo]
+    seconds = max(t["min_seconds"], round(move.seconds * t["scale"]))
+    pacing = t["pacing_override"] or move.pacing
+    return Move(
+        key=move.key, label=move.label, camera=move.camera, pacing=pacing,
+        seconds=seconds, exterior=move.exterior, notes=move.notes, tags=move.tags,
+    )
+
+
 # Look presets. These are the only place tone is decided, so a brand-wide look
 # change is one edit here rather than a re-write of every prompt.
 STYLES: dict[str, str] = {

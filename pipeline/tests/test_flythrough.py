@@ -597,3 +597,41 @@ def test_no_taxonomy_contains_a_person():
     for mod in (products, vehicles, rooms):
         keys = set(mod.TOUR_ORDER) | set(mod.ALIASES)
         assert not (keys & banned), f"{mod.__name__} references a person"
+
+
+# --- tempo ------------------------------------------------------------------
+
+def test_ad_tempo_is_cheaper_and_denser_than_tour_tempo():
+    """The lesson that cost real credits: slow tour pacing on a performance
+    object is both blander AND more expensive than a proper ad cut."""
+    from flythrough.moves import MOVES, at_tempo
+    tour = [at_tempo(MOVES[k], "tour") for k in ("orbit_left", "orbit_left", "enter_from_light")]
+    ad = [at_tempo(MOVES[k], "ad") for k in
+          ("orbit_left", "detail_drift", "orbit_left", "enter_from_light",
+           "detail_push", "glide_through")]
+    assert sum(m.seconds for m in ad) < sum(m.seconds for m in tour)
+    assert len(ad) > len(tour)
+
+
+def test_tempo_never_goes_below_a_renderable_beat():
+    """Under ~2s an anchored shot cannot travel between its frames without
+    lurching, so every tempo floors there."""
+    from flythrough.moves import MOVES, TEMPO, at_tempo
+    for tempo in TEMPO:
+        for move in MOVES.values():
+            assert at_tempo(move, tempo).seconds >= 2
+
+
+def test_tempo_rewrites_pacing_not_just_duration():
+    from flythrough.moves import MOVES, at_tempo
+    calm = at_tempo(MOVES["orbit_left"], "tour")
+    fast = at_tempo(MOVES["orbit_left"], "ad")
+    assert "slow" in calm.pacing
+    assert "slow" not in fast.pacing and calm.pacing != fast.pacing
+    assert calm.camera == fast.camera        # the move itself is unchanged
+
+
+def test_unknown_tempo_is_refused():
+    from flythrough.moves import MOVES, at_tempo
+    with pytest.raises(KeyError, match="unknown tempo"):
+        at_tempo(MOVES["orbit_left"], "cinematic")
