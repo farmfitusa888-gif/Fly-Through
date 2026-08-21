@@ -56,6 +56,91 @@ class Deliverables:
     vertical_web: Path | None = None
 
 
+def _motion_profile(path: str | Path, w: int = 96, h: int = 54) -> list[float]:
+    """Mean pixel change between consecutive frames, cheaply."""
+    r = subprocess.run(
+        [FFMPEG, "-i", str(path), "-vf", f"scale={w}:{h}", "-pix_fmt", "gray",
+         "-f", "rawvideo", "-"], capture_output=True)
+    b, sz = r.stdout, w * h
+    fr = [b[i:i + sz] for i in range(0, len(b) - sz + 1, sz)]
+    return [sum(abs(x - y) for x, y in zip(fr[i], fr[i + 1])) / sz
+            for i in range(len(fr) - 1)]
+
+
+def trim_stalls(
+    src: str | Path,
+    out: str | Path,
+    *,
+    threshold: float = 0.35,
+    min_trim: float = 0.08,
+    max_trim_fraction: float = 0.40,
+    keep_min: float = 0.60,
+    fps: int = 30,
+) -> Path:
+    """Cut the dead frames off both ends of an anchored clip.
+
+    THE PROBLEM THIS SOLVES, measured on a delivered tour: every anchored clip
+    stalls at both ends. Middle-of-clip motion averaged ~13 units of mean pixel
+    change; the first six frames averaged 0.6 and the last six 0.4 -- twenty to
+    thirty times less. The model decelerates into its end anchor and accelerates
+    out of its start anchor, which is correct behaviour for one shot and ruinous
+    when you join them, because every seam becomes a double freeze: one dead tail
+    immediately followed by one dead head.
+
+    The result reads as a slideshow rather than a moving camera, which is exactly
+    what an operator reported before this was measured.
+
+    Trimming to where motion first and last exceeds `threshold` of the clip's own
+    median removes the freeze without touching the middle. `max_trim` caps how
+    much may be taken from either end so a genuinely slow shot is never gutted.
+    """
+    src, out = Path(src), Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    prof = _motion_profile(src)
+    dur = probe_duration(src)
+    if not prof:
+        shutil.copy2(src, out)
+        return out
+
+    # Gate on the clip's own sustained motion, not its median. A median is pulled
+    # down by the very stalls being removed, which is why a median gate left two
+    # clips almost untrimmed while their heads still sat 15x below their middles.
+    ordered = sorted(prof)
+    sustained = ordered[int(len(ordered) * 0.7)] or 0.0
+    gate = sustained * threshold
+
+    first = next((i for i, v in enumerate(prof) if v > gate), 0)
+    last = next((i for i in range(len(prof) - 1, -1, -1) if prof[i] > gate), len(prof) - 1)
+
+    # The stall is systematic -- it appeared on both ends of every clip measured --
+    # so a small floor is applied even when the gate does not fire. Without it a
+    # clip whose first frames happen to twitch keeps its freeze and the seam still
+    # reads as a held image.
+    # The cap must scale with clip length. Measured on a 4.97s anchored clip,
+    # motion died 1.33s before the end -- 27% of the clip was a frozen hold on the
+    # anchor frame. A fixed 0.55s cap silently blocked that cut, which is why the
+    # seams still read as held images after the first fix.
+    cap = int(max_trim_fraction * dur * fps)
+    floor = int(min_trim * fps)
+    head = min(max(first, floor), cap)
+    tail = min(max(len(prof) - 1 - last, floor), cap)
+
+    # Never trim a clip below something renderable.
+    if (len(prof) - head - tail) / fps < keep_min:
+        spare = max(0, len(prof) - int(keep_min * fps))
+        head = min(head, spare // 2)
+        tail = min(tail, spare - head)
+
+    start = head / fps
+    end = max(dur - tail / fps, start + 1.0 / fps)
+
+    _run([FFMPEG, "-y", "-loglevel", "error", "-ss", f"{start:.3f}",
+          "-to", f"{end:.3f}", "-i", str(src),
+          "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+          "-pix_fmt", "yuv420p", "-an", str(out)])
+    return out
+
+
 def concat(
     clips: list[str | Path],
     out: str | Path,

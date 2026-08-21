@@ -677,3 +677,60 @@ def test_end_card_renders(tmp_path):
     from flythrough.compliance import make_end_card
     c = make_end_card("https://iflythroughit.com/o/x", tmp_path / "e.mp4", seconds=2.0)
     assert c.exists() and probe_duration(c) == pytest.approx(2.0, abs=0.2)
+
+
+# --- stall trimming ---------------------------------------------------------
+
+def test_trim_removes_a_frozen_tail(tmp_path):
+    """Anchored clips decelerate into their end frame. Measured on a real 4.97s
+    clip, motion died 1.33s before the end -- 27% of the clip was a held image,
+    and a compilation of five such clips was 43.8% frozen frames."""
+    from flythrough.assemble import trim_stalls, _motion_profile
+
+    moving = tmp_path / "moving.mp4"
+    subprocess.run(
+        ["ffmpeg", "-f", "lavfi", "-i", "testsrc2=s=640x360:d=3:r=30",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(moving), "-y", "-loglevel", "error"],
+        check=True)
+    frozen = tmp_path / "frozen.mp4"
+    subprocess.run(
+        ["ffmpeg", "-f", "lavfi", "-i", "color=c=0x336699:s=640x360:d=2:r=30",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(frozen), "-y", "-loglevel", "error"],
+        check=True)
+    joined = tmp_path / "joined.mp4"
+    subprocess.run(
+        ["ffmpeg", "-i", str(moving), "-i", str(frozen), "-filter_complex",
+         "[0:v][1:v]concat=n=2:v=1[v]", "-map", "[v]", "-c:v", "libx264",
+         "-pix_fmt", "yuv420p", str(joined), "-y", "-loglevel", "error"], check=True)
+
+    before = probe_duration(joined)
+    out = trim_stalls(joined, tmp_path / "trimmed.mp4")
+    after = probe_duration(out)
+    assert after < before - 1.0, f"frozen tail not removed: {before} -> {after}"
+
+    pf = _motion_profile(out)
+    sustained = sorted(pf)[int(len(pf) * 0.7)]
+    tail = sum(pf[-5:]) / 5
+    assert tail > sustained * 0.15, "tail still frozen after trim"
+
+
+def test_trim_never_guts_a_short_clip(tmp_path):
+    """A 2s ad beat must survive trimming with something renderable left."""
+    from flythrough.assemble import trim_stalls
+    src = tmp_path / "beat.mp4"
+    subprocess.run(
+        ["ffmpeg", "-f", "lavfi", "-i", "color=c=gray:s=640x360:d=2:r=30",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src), "-y", "-loglevel", "error"],
+        check=True)
+    out = trim_stalls(src, tmp_path / "out.mp4")
+    assert probe_duration(out) >= 0.55
+
+
+def test_trim_cap_scales_with_clip_length(tmp_path):
+    """A fixed cap silently blocked a needed 1.7s cut on a 5s clip. The cap must
+    be a fraction of duration, not an absolute."""
+    import inspect
+    from flythrough.assemble import trim_stalls
+    sig = inspect.signature(trim_stalls)
+    assert "max_trim_fraction" in sig.parameters
+    assert "max_trim" not in sig.parameters
