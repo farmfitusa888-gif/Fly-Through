@@ -751,3 +751,69 @@ def test_trim_has_no_arbitrary_cap(tmp_path):
     assert "max_trim_fraction" not in params
     assert "keep_min" in params
     assert "min_run" in params
+
+
+# ---------------------------------------------------------------- site pricing
+
+
+def _pricing_modules():
+    """model/ is not a package and imports flythrough from pipeline/."""
+    root = Path(__file__).resolve().parents[2]
+    for extra in (root / "model", root / "pipeline"):
+        if str(extra) not in sys.path:
+            sys.path.insert(0, str(extra))
+    import ad_pricing
+    import export_pricing
+    return ad_pricing, export_pricing
+
+
+def test_site_pricing_json_matches_the_model():
+    """The page reads site/pricing.json. If someone edits a price in the model
+    and forgets to re-export, the site ships the old number -- to a customer.
+    This test is the only thing standing between those two states."""
+    _, export_pricing = _pricing_modules()
+    on_disk = json.loads(export_pricing.OUT.read_text())
+    assert on_disk == export_pricing.build(), (
+        "site/pricing.json is stale -- run python3 model/export_pricing.py")
+
+
+def test_every_priced_product_has_customer_copy():
+    """Renaming a product in the model must fail loudly here rather than
+    rendering an unlabelled card on a live page."""
+    ad_pricing, export_pricing = _pricing_modules()
+    for p in ad_pricing.PRODUCTS:
+        assert p.name in export_pricing.VEHICLE_COPY, p.name
+    from unit_economics import TIERS
+    for t in TIERS:
+        assert t.name in export_pricing.PROPERTY_COPY, t.name
+
+
+def test_no_priced_offer_sells_below_cost():
+    """Every vehicle offer and lot plan must clear its render and payment fees."""
+    ad_pricing, _ = _pricing_modules()
+    for p in ad_pricing.PRODUCTS:
+        assert p.margin()["gp"] > 0, p.name
+    for lp in ad_pricing.LOT_PLANS:
+        m = lp.margin()
+        assert m["gp"] > 0, lp.name
+        assert lp.per_unit < ad_pricing.PRODUCTS[0].price, (
+            f"{lp.name} is not a discount on the a la carte rate")
+
+
+def test_lot_plans_get_cheaper_per_unit_as_volume_rises():
+    ad_pricing, _ = _pricing_modules()
+    rates = [lp.per_unit for lp in ad_pricing.LOT_PLANS]
+    assert rates == sorted(rates, reverse=True), rates
+
+
+def test_landing_page_hardcodes_no_prices():
+    """Prices belong to the model. A dollar figure typed into the page template
+    is a number that will one day disagree with the invoice."""
+    import re
+    root = Path(__file__).resolve().parents[2]
+    src = (root / "site" / "build_landing.py").read_text()
+    # Competitor anchors in the lede are ranges and deliberately not ours.
+    allowed = {"$300–$500", "$150–$500", "$150–$400",  # competitor anchors
+               "$500–$5,000"}                          # cited MLS penalty range
+    found = set(re.findall(r"\$[\d,]+(?:–\$[\d,]+)?", src)) - allowed
+    assert not found, f"hardcoded prices in the landing template: {sorted(found)}"

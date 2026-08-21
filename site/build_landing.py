@@ -18,6 +18,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 CONFIG = json.loads((HERE / "config.json").read_text())
 MEDIA = json.loads((HERE / "media.json").read_text())
+PRICING = json.loads((HERE / "pricing.json").read_text())
 IMG = Path("/tmp/claude-0/-home-user-Fly-Through/fe243ec4-8c0d-5a0f-b58d-a7344e98d8b6/scratchpad/web")
 OUT = HERE / "dist" / "index.html"
 
@@ -62,6 +63,7 @@ a{color:var(--ember)}
   text-transform:uppercase;color:var(--ember);margin:0 0 20px}
 h1{font-size:clamp(3rem,10.5vw,8.2rem);margin:0 0 22px}
 h1 em{font-style:normal;color:var(--ember);display:block}
+h2 em{font-style:normal;color:var(--ember);display:block}
 .hero p{font-size:clamp(1.05rem,2.2vw,1.36rem);color:var(--paper);max-width:34ch;
   margin:0 0 34px;opacity:.92}
 .cta{display:inline-flex;align-items:center;gap:12px;background:var(--ember);
@@ -135,7 +137,55 @@ p{max-width:66ch}
 .tier ul{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:10px}
 .tier li{font-size:.93rem;color:var(--dim);display:grid;grid-template-columns:14px 1fr;gap:10px}
 .tier li b{color:var(--ember);font-weight:400}
-@media(max-width:900px){.tiers{grid-template-columns:1fr}}
+.tiers.four{grid-template-columns:repeat(4,1fr);gap:14px}
+.tiers.four .tier{padding:26px 20px}
+.tiers.four .tier .price{font-size:2.4rem}
+.rail{display:flex;align-items:baseline;gap:16px;margin:64px 0 0;flex-wrap:wrap}
+.rail h3{font-size:1.6rem;margin:0}
+.rail span{color:var(--faint);font-size:.93rem}
+.rail:first-of-type{margin-top:40px}
+.bands{width:100%;border-collapse:collapse;margin-top:34px;
+  border:1px solid var(--rule);border-radius:4px;overflow:hidden}
+.bands th{font-family:"JetBrains Mono",monospace;font-size:.68rem;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--dim);text-align:left;padding:14px 18px;
+  background:var(--ink-2);border-bottom:1px solid var(--rule);font-weight:400}
+.bands td{padding:16px 18px;border-bottom:1px solid var(--rule);
+  color:var(--dim);font-size:.93rem;vertical-align:top}
+.bands tr:last-child td{border-bottom:0}
+.bands td.b{font-family:"Anton",sans-serif;text-transform:uppercase;color:var(--paper);
+  font-size:1.05rem;white-space:nowrap}
+.bands td.p span{font-family:"JetBrains Mono",monospace;font-size:.62rem;
+  color:var(--faint);letter-spacing:.1em}
+.bands td.p{font-family:"Anton",sans-serif;color:var(--ember);font-size:1.3rem;
+  font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+@media(max-width:900px){.tiers,.tiers.four{grid-template-columns:1fr}
+  .bands td.why{display:none}}
+
+/* ---------- doors ---------- */
+.doors{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:44px 0 0;text-align:left}
+.door{background:var(--card);border:1px solid var(--rule);border-radius:4px;padding:34px 30px;
+  display:flex;flex-direction:column}
+.door.hot{border-color:var(--ember);background:#17120D}
+.door .who{font-family:"JetBrains Mono",monospace;font-size:.68rem;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--ember);margin:0 0 12px}
+.door h3{font-size:1.7rem;margin:0 0 14px}
+.door p{color:var(--dim);font-size:.96rem;max-width:none;margin:0 0 16px}
+.door p.mono{color:var(--faint);font-size:.8rem;letter-spacing:.06em;margin-bottom:24px}
+.door .cta{margin-top:auto;align-self:flex-start}
+@media(max-width:860px){.doors{grid-template-columns:1fr}}
+
+/* ---------- split compare ---------- */
+.split{display:grid;grid-template-columns:1fr 1fr;gap:2px;margin-top:40px;
+  border:1px solid var(--rule);border-radius:4px;overflow:hidden}
+.split > div{background:var(--ink-2);padding:34px 30px}
+.split > div.hot{background:#17120D}
+.split h3{font-size:1.7rem;margin:0 0 6px}
+.split .who{font-family:"JetBrains Mono",monospace;font-size:.68rem;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--ember);margin:0 0 18px}
+.split p{color:var(--dim);font-size:.96rem;max-width:none;margin:0 0 14px}
+.split p:last-child{margin:0}
+.split strong{color:var(--paper);font-weight:500}
+@media(max-width:860px){.split{grid-template-columns:1fr}}
 
 /* ---------- compliance ---------- */
 .warn{border:1px solid var(--ember-dim);background:#16100A;border-radius:4px;
@@ -187,6 +237,47 @@ VIDEO_CSS = """
 """
 
 
+def money(v: float) -> str:
+    return f"${v:,.0f}" if float(v).is_integer() else f"${v:,.2f}"
+
+
+def tier_cards(rows: list[dict], *, four: bool = False) -> str:
+    """Render priced cards straight from pricing.json. No number is typed here."""
+    cards = []
+    for r in rows:
+        bullets = "\n".join(
+            f'<li><b>·</b><span>{b}</span></li>' for b in r["bullets"])
+        cls = "tier feature" if r.get("featured") else "tier"
+        name = r["name"].replace(" - ", " — ") + (" · most taken" if r.get("featured") else "")
+        cards.append(
+            f'<div class="{cls}"><p class="name">{name}</p>'
+            f'<p class="price">{money(r["price"])}</p>'
+            f'<p class="per">{r["per"]}</p><ul>{bullets}</ul></div>')
+    grid = "tiers four" if four else "tiers"
+    return f'<div class="{grid}">{"".join(cards)}</div>'
+
+
+def lot_table(rows: list[dict]) -> str:
+    body = "\n".join(
+        f'<tr><td class="b">{r["name"]}</td>'
+        f'<td>{r["units"]} vehicles a month</td>'
+        f'<td class="why">{money(r["per_unit"])} a vehicle</td>'
+        f'<td class="p">{money(r["price"])}<span>/mo</span></td></tr>' for r in rows)
+    return (f'<table class="bands"><tr><th>Plan</th><th>Volume</th>'
+            f'<th class="why">Effective rate</th>'
+            f'<th style="text-align:right">Monthly</th></tr>{body}</table>')
+
+
+def band_table(rows: list[dict]) -> str:
+    body = "\n".join(
+        f'<tr><td class="b">{r["band"]}</td><td>{r["product"]}</td>'
+        f'<td class="why">{r["why"]}</td><td class="p">{money(r["price"])}</td></tr>'
+        for r in rows)
+    return (f'<table class="bands"><tr><th>Vehicle price</th><th>What we cut</th>'
+            f'<th class="why">Why</th><th style="text-align:right">Per unit</th></tr>'
+            f'{body}</table>')
+
+
 def build() -> Path:
     d = CONFIG
     hero, closer = data_uri("hero.jpg"), data_uri("closer.jpg")
@@ -218,6 +309,20 @@ def build() -> Path:
             f'<p>{v["waiting_on"]}</p>'
             f'<p class="brief">{v["brief"]}</p></div>' for v in waiting)
         slots = f'<div class="pending">{cards}</div>'
+
+    prop_tiers = tier_cards(PRICING["property"])
+    veh_tiers = tier_cards(PRICING["vehicle"], four=True)
+    bands = band_table(PRICING["bands"])
+    lot_plans = lot_table(PRICING["lot_plans"])
+    default = next(t for t in PRICING["property"] if t["featured"])
+    default_price = money(default["price"])
+    default_seconds = default["per"].rsplit("·", 1)[-1].strip().split()[0]
+    lot_entry = PRICING["lot_plans"][0]
+    lot_entry_price, lot_entry_units = money(lot_entry["price"]), lot_entry["units"]
+    email, domain, short_domain = d["contact_email"], d["domain"], d["short_domain"]
+    ret = PRICING["retainer"]
+    ret_price, ret_n = money(ret["price"]), ret["listings"]
+    ret_each = money(ret["per_listing"])
 
     strip = "\n".join(
         f'<figure><img src="{b}" alt="{l} anchor frame" loading="lazy">'
@@ -314,46 +419,50 @@ def build() -> Path:
   </div>
 </section>
 
+<section id="cut">
+  <div class="wrap">
+    <p class="eyebrow">The difference that matters</p>
+    <h2>A walkaround is<br>inventory. An ad<em> is an argument.</em></h2>
+    <p class="lede">Most vehicle video is documentation — proof the car exists, shot the same way for every unit on the lot. Useful. Not persuasive. We make both, and we do not pretend they are the same thing.</p>
+
+    <div class="split">
+      <div>
+        <p class="who">Walkaround</p>
+        <h3>Every VIN</h3>
+        <p>One template, run across the whole lot. Exterior orbit, interior, dash, wheels. Twenty seconds. It goes on the vehicle detail page and it makes a static gallery feel alive.</p>
+        <p>It is <strong>identical for every unit</strong> — and that is the point. A dealer with 300 cars cannot brief 300 films.</p>
+        <p>Priced as a commodity, sold by the month.</p>
+      </div>
+      <div class="hot">
+        <p class="who">Ad cut</p>
+        <h3>One vehicle</h3>
+        <p>Briefed to the unit. A Ferrari opens on the badge and snaps between beats at hype tempo. A Silverado opens wide on the stance, holds on the bed and the red leather, and moves with weight.</p>
+        <p><strong>Same anchoring engine, different argument.</strong> Tempo, opening frame, closing frame, which details get a push and which get skipped — all of it changes per vehicle.</p>
+        <p>Priced against the marketing budget the unit already carries.</p>
+      </div>
+    </div>
+    <p style="color:var(--faint);font-size:.9rem;margin-top:18px" class="mono">The second one is what we actually sell. The first one is how we get in the door.</p>
+  </div>
+</section>
+
 <section id="price">
   <div class="wrap">
     <p class="eyebrow">Pricing</p>
     <h2>Below a crew.<br>Above a filter.</h2>
-    <p class="lede">A walkthrough video runs $300–$500 and takes a week. A drone package runs $150–$500 and needs a weather window and a licensed pilot. We need a folder.</p>
-    <div class="tiers">
-      <div class="tier">
-        <p class="name">Single listing</p>
-        <p class="price">$149</p>
-        <p class="per">one property · 30 seconds</p>
-        <ul>
-          <li><b>·</b><span>16:9 master + thumbnail</span></li>
-          <li><b>·</b><span>Full disclosure pack</span></li>
-          <li><b>·</b><span>24-hour delivery</span></li>
-          <li><b>·</b><span>One revision</span></li>
-        </ul>
-      </div>
-      <div class="tier feature">
-        <p class="name">Listing pro · most taken</p>
-        <p class="price">$249</p>
-        <p class="per">one property · 42 seconds</p>
-        <ul>
-          <li><b>·</b><span>Everything in Single</span></li>
-          <li><b>·</b><span>9:16 vertical for Reels</span></li>
-          <li><b>·</b><span>MLS + social caption text</span></li>
-          <li><b>·</b><span>Two revisions</span></li>
-        </ul>
-      </div>
-      <div class="tier">
-        <p class="name">Dealer lot plan</p>
-        <p class="price">$39</p>
-        <p class="per">per vehicle · 50/mo from $1,450</p>
-        <ul>
-          <li><b>·</b><span>20s walkaround, every VIN</span></li>
-          <li><b>·</b><span>9:16 + 16:9 + thumbnail</span></li>
-          <li><b>·</b><span>Folder drop, 24h turnaround</span></li>
-          <li><b>·</b><span>You own it outright</span></li>
-        </ul>
-      </div>
-    </div>
+    <p class="lede">A walkthrough video runs $300–$500 and takes a week. A drone package runs $150–$500 and needs a weather window and a licensed pilot. A freelance vehicle spot runs $150–$400. We need a folder.</p>
+
+    <div class="rail"><h3>Property</h3><span>per listing · 24-hour delivery · disclosure pack included</span></div>
+    {prop_tiers}
+    <p style="color:var(--faint);font-size:.92rem;margin-top:16px">Listing agents who shoot every week take the retainer: <strong style="color:var(--paper)">{ret_price} for {ret_n} listings a month</strong> — {ret_each} each, billed once, no per-job approval.</p>
+
+    <div class="rail"><h3>Vehicles</h3><span>per unit · your photos · you own the file outright</span></div>
+    {veh_tiers}
+
+    <p style="color:var(--dim);font-size:.98rem;margin-top:34px;max-width:66ch">We price a vehicle ad against what the vehicle is worth, not what it costs us to make. Production is near-identical at every tier — the render on a premium ad cut is under two dollars. What differs is the marketing budget already attached to the unit.</p>
+    {bands}
+    <div class="rail"><h3>Lot plans</h3><span>walkarounds in volume · one monthly invoice</span></div>
+    {lot_plans}
+    <p style="color:var(--faint);font-size:.86rem;margin-top:14px" class="mono">Ad cuts are ordered per unit, on top of any plan, whenever a car deserves one.</p>
   </div>
 </section>
 
@@ -384,15 +493,29 @@ def build() -> Path:
 </section>
 
 <section id="start" style="background-image:linear-gradient(180deg,rgba(8,9,11,.90),rgba(8,9,11,.97)),url('{closer}');background-size:cover;background-position:center">
-  <div class="wrap narrow" style="text-align:center">
-    <p class="eyebrow" style="justify-content:center">Start here</p>
-    <h2>Send one listing.<br>We'll do it free.</h2>
-    <p class="lede" style="margin-left:auto;margin-right:auto">Pick a property that's currently active. Send the photos you already have. You'll have the film tomorrow. If you like it, it's $249 a listing after that — and if you don't, keep it anyway.</p>
-    <p style="margin:0 auto 34px;max-width:none">
-      <a class="cta" href="mailto:{d['contact_email']}?subject=Free%20sample%20—%20my%20listing">Email the photos →</a>
-      <a class="cta ghost" href="#how" style="margin-left:10px">See how it works</a>
-    </p>
-    <p class="mono" style="color:var(--faint);font-size:.8rem;margin:0 auto">{d['contact_email']}</p>
+  <div class="wrap" style="text-align:center">
+    <p class="eyebrow">Start here</p>
+    <h2>Send us one.<br>The first one<em>is free.</em></h2>
+    <p class="lede" style="margin-left:auto;margin-right:auto;text-align:center">No brief, no call, no card. Send the photos you already have and you will have the film tomorrow. If you like it, you pay for the next one. If you don't, keep it anyway.</p>
+
+    <div class="doors">
+      <div class="door">
+        <p class="who">Listing agents</p>
+        <h3>One active listing</h3>
+        <p>Six to twelve photos, whatever your photographer delivered. We cut a {default_seconds}-second tour in buyer's-walk order, with the disclosure pack attached and your originals hosted.</p>
+        <p class="mono">Then {default_price} a listing, or {ret_price} for {ret_n} a month.</p>
+        <a class="cta" href="mailto:{email}?subject=Free%20sample%20—%20my%20listing">Email the photos →</a>
+      </div>
+      <div class="door hot">
+        <p class="who">Dealers</p>
+        <h3>Three vehicles</h3>
+        <p>Pick your worst-performing unit, your newest arrival, and the one you are proudest of. You get a walkaround, an ad cut and a vertical back — and you will see immediately which one sells.</p>
+        <p class="mono">Then {lot_entry_price} a month for {lot_entry_units} walkarounds. Ad cuts on top.</p>
+        <a class="cta" href="mailto:{email}?subject=Three%20free%20vehicles%20—%20my%20lot">Email the VINs →</a>
+      </div>
+    </div>
+
+    <p class="mono" style="color:var(--faint);font-size:.8rem;margin:36px auto 0">{email} · {domain} · {short_domain}</p>
   </div>
 </section>
 
