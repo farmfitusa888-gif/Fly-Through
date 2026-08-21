@@ -64,7 +64,13 @@ def test_plan_is_ordered_and_complete(photos):
     assert len(plan.shots) == 12
     assert plan.shots[0].from_room == "street"
     assert plan.shots[-1].to_room == "aerial"
-    assert plan.warnings == []
+    # Coverage is complete: no missing anchors, no thin shoot, no unreadable
+    # labels. The one warning this shoot legitimately raises is the ground-to-
+    # aerial viewpoint risk, which is a property of the shoot, not a defect.
+    coverage = [w for w in plan.warnings
+                if "Missing tour anchor" in w or "photo(s)" in w
+                or "establishing shot" in w]
+    assert coverage == [], coverage
 
 
 @pytest.mark.parametrize("cap", [None, 50, 40, 30, 20, 12])
@@ -317,3 +323,47 @@ def test_registry_and_provider_layers_combine(tmp_path):
               registry=reg, provider_records=[SHEET_RECORD])
     assert v.missing == ["dining"]
     assert v.have["aerial"] == "local1" and v.have["living"] == "sheet1"
+
+
+# --- viewpoint continuity ---------------------------------------------------
+
+@pytest.mark.parametrize("label,room,expected", [
+    ("01_street", "street", "front"),
+    ("02_front-elevation", "exterior", "front"),
+    ("rear elevation", "exterior", "rear"),
+    ("11_deck", "patio", "rear"),
+    ("12_backyard-pool", "pool", "rear"),
+    ("13_drone-overhead", "aerial", "above"),
+    ("04_great-room", "living", "inside"),
+])
+def test_side_detection(label, room, expected):
+    from flythrough.viewpoint import side_of
+    assert side_of(label, room) == expected
+
+
+def test_flags_the_ground_to_aerial_failure_that_actually_happened():
+    """Patio (rear) -> aerial framed over the front produced a 'second house'."""
+    from flythrough.viewpoint import assess
+    risks = assess([("11_deck", "rear", "13_drone-overhead", "above")])
+    assert len(risks) == 1
+    assert risks[0].severity == "warn"
+    assert "different house" in risks[0].reason
+    assert "rear" in risks[0].fix
+
+
+def test_blocks_opposite_elevations_joined_directly():
+    from flythrough.viewpoint import assess
+    risks = assess([("front", "front", "patio", "rear")])
+    assert risks and risks[0].severity == "block"
+
+
+def test_interior_transitions_are_never_flagged():
+    from flythrough.viewpoint import assess
+    assert assess([("kitchen", "inside", "dining", "inside")]) == []
+
+
+def test_plan_surfaces_viewpoint_risk_before_spending(photos):
+    """The warning must reach the plan, which is what gates the spend."""
+    plan = build_plan(photos, listing="Test House")
+    joined = " ".join(plan.warnings)
+    assert "different house" in joined, plan.warnings

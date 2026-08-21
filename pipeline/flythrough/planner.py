@@ -14,6 +14,7 @@ from pathlib import Path
 
 from . import moves as mv
 from .rooms import Room, resolve
+from .viewpoint import assess, side_of
 
 IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp", ".heic", ".tif", ".tiff"})
 
@@ -23,7 +24,7 @@ REQUIRED_ANCHORS = ("exterior", "living", "kitchen")
 
 @dataclass
 class Photo:
-    """One source photograph with its resolved room."""
+    """One source photograph with its resolved room and camera side."""
 
     path: str
     label: str
@@ -32,6 +33,7 @@ class Photo:
     interior: bool
     order_hint: int          # leading number in the filename, if the agent used one
     index: int = 0
+    side: str = "unknown"    # which face of the building the camera was on
 
     @property
     def room(self) -> Room:
@@ -136,6 +138,7 @@ def load_photos(folder: str | Path) -> list[Photo]:
                 rank=room.rank,
                 interior=room.interior,
                 order_hint=_order_hint(f.stem),
+                side=side_of(label, room.key),
             )
         )
     return photos
@@ -174,6 +177,15 @@ def _audit(photos: list[Photo]) -> list[str]:
             f"Only {len(photos)} photo(s). Below 4 the result is a clip, not a tour; "
             "8-14 is the range that produces a usable listing video."
         )
+    for r in assess([
+        (a.label, a.side, b.label, b.side) for a, b in zip(photos, photos[1:])
+    ]):
+        tag = "BLOCKS" if r.severity == "block" else "Risk"
+        warnings.append(
+            f"{tag} at shot {r.index} ({r.from_label} -> {r.to_label}): "
+            f"{r.reason} FIX: {r.fix}"
+        )
+
     unknown = [p.label for p in photos if p.room_key == "other"]
     if unknown:
         warnings.append(

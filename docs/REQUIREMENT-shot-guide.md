@@ -45,6 +45,21 @@ that is the core pitch, with a secondary path for shooting fresh.
 **B. For photographer partners** — technical. Focal length, straight verticals,
 consistent white balance and exposure **between adjacent rooms in tour order**.
 
+### Two rules the guide MUST carry, both learned from real failures
+
+**1. The aerial must be framed over the same side of the house as the ground
+shot that precedes it.** Discovered in the first full demo tour: a patio still
+(shot from the lawn, looking at the REAR) was paired with an aerial framed over
+the FRONT. Asked to connect them in one continuous move, the model flew up and
+over and landed on what looked like a different house. There is no camera path
+between a ground view of the back and an overhead view of the front, so the model
+invented one. Now enforced by `viewpoint.assess`, but the real fix is at capture:
+tell the client which side to shoot the aerial from.
+
+**2. Never supply photos of opposite elevations with nothing between them.**
+Front directly to rear has no continuous path either. The guide should ask for a
+side elevation or an aerial as the bridge.
+
 > The most important line in version B: adjacent anchor photos must match in
 > white balance and exposure. A colour pop at the seam is the failure mode most
 > likely to appear on real jobs, because agents shoot rooms at different times of
@@ -65,3 +80,5 @@ consistent white balance and exposure **between adjacent rooms in tour order**.
 - [ ] Both audience versions produced from one source
 - [ ] A shoot following the guide produces a plan with **zero** warnings from `_audit()`
 - [ ] Names the seam-matching rule explicitly in the photographer version
+- [ ] Names the aerial-side rule and the opposite-elevation rule, both of which
+      are enforced by `viewpoint.assess` and must agree with it
