@@ -1,0 +1,174 @@
+{
+  "_note": "The 15 rendered car beats, in cut order, keyed by the OpenArt file id that prefixes every downloaded filename. samples/cars/ingest.py matches on that prefix, so the clips can be dropped in with whatever names the OpenArt zip gave them and still land in the right order.",
+  "_source": "OpenArt project V0CbPyLdg5HOHc1h6Y50, rendered 2026-08-21. wan2-7 image2video, dual-anchor, 1926x1076.",
+  "films": {
+    "ferrari": {
+      "title": "Rosso Corsa berlinetta",
+      "brief": "Exotic performance / hype tempo / showroom",
+      "tempo": "hype",
+      "style": "showroom",
+      "disclosure": "none",
+      "beats": [
+        {
+          "n": 1,
+          "id": "36199589",
+          "from": "front three-quarter",
+          "to": "engine bay",
+          "move": "orbit ccw",
+          "seconds": 2.066,
+          "file": "36199589-metadata_user_5d839761f3cbc328_1787289389598_ffed47b0.mp4",
+          "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/36199589-metadata_user_5d839761f3cbc328_1787289389598_ffed47b0.mp4"
+        },
+        {
+          "n": 2,
+          "id": "98869283",
+          "from": "engine bay",
+          "to": "wheel",
+          "move": "drift across",
+          "seconds": 2.066,
+          "file": "98869283-metadata_user_bfcdcd20da9d1e9e_1787289402973_2abd346e.mp4",
+          "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/98869283-metadata_user_bfcdcd20da9d1e9e_1787289402973_2abd346e.mp4"
+        },
+        {
+          "n": 3,
+          "id": "21316525",
+          "from": "wheel",
+          "to": "rear",
+          "move": "orbit ccw",
+          "seconds": 2.066,
+          "file": "21316525-metadata_user_fd8a26d5e4a56aa8_1787289386983_86685c60.mp4",
+          "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/21316525-metadata_user_fd8a26d5e4a56aa8_1787289386983_86685c60.mp4"
+        },
+        {
+          "n": 4,
+          "id": "3885864",
+          "from": "rear",
+          "to": "driver side",
+          "move": "orbit ccw",
+          "seconds": 2.066,
+          "file": "3885864-metadata_user_341c4cdfc2ee13cf_1787289391197_5cac8491.mp4",
+          "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/3885864-metadata_user_341c4cdfc2ee13cf_1787289391197_5cac8491.mp4"
+        },
+        {
+          "n": 5,
+          "id": "87651887",
+          "from": "driver side",
+          "to": "centre screen",
+          "move": "push in",
+          "seconds": 2.066,
+          "file": "87651887-metadata_user_7afd2cf6421d7bf8_1787289512647_4b3de95b.mp4",
+          "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/87651887-metadata_user_7afd2cf6421d7bf8_1787289512647_4b3de95b.mp4"
+        },
+        {
+          "n": 6,
+          "id": "7974821",
+          "from": "centre screen",
+          "to": "dashboard",
+          "move": "float forward",
+          "seconds": 2.066,
+          "file": "7974821-metadata_user_2cfb3015634dd817_1787289527023_b70ef101.mp4",
+          "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/7974821-metadata_user_2cfb3015634dd817_1787289527023_b70ef101.mp4"
+        },
+        {
+          "n": 7,
+          "id": "55879994",
+          "from": "dashboard",
+          "to": "front seats",
+          "move": "float forward",
+          "seconds": 2.066,
+          "file": "55879994-metadata_user_a24d2e8bfba3255f_1787289429832_3097a9aa.mp4",
+          "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/55879994-metadata_user_a24d2e8bfba3255f_1787289429832_3097a9aa.mp4"
+        },
+        {
+          "n": 8,
+          "id": "4230989",
+          "from": "front seats",
+          "to": "front three-quarter",
+          "move": "glide inside out",
+          "seconds": 2.066,
+          "file": "4230989-metadata_user_bbb0fe20e52d05bb_1787289432147_08503208.mp4",
+          "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/4230989-metadata_user_bbb0fe20e52d05bb_1787289432147_08503208.mp4"
+        }
+      ]
+    },
+    "silverado": {
+      "title": "Silverado crew cab",
+      "brief": "Full-size pickup / ad tempo / lot daylight",
+      "tempo": "ad",
+      "style": "lot",
+      "disclosure": "none",
+      "beats": [
+        {
+          "n": 1,
+          "id": "70429844",
+          "from": "front three-quarter",
+          "to": "wheel",
+          "move": "push in",
+          "seconds": 2.066,
+          "file": "70429844-metadata_user_62a450728f81b94e_1787289752492_1a59995b.mp4",
+          "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/70429844-metadata_user_62a450728f81b94e_1787289752492_1a59995b.mp4"
+        },
+        {
+          "n": 2,
+          "id": "10679185",
+          "from": "wheel",
+          "to": "driver side",
+          "move": "orbit ccw",
+          "seconds": 3.065,
+          "file": "10679185-metadata_user_539988aab5481ed8_1787289770527_e79c1b70.mp4",
+          "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/10679185-metadata_user_539988aab5481ed8_1787289770527_e79c1b70.mp4"
+        },
+        {
+          "n": 3,
+          "id": "62565151",
+          "from": "driver side",
+          "to": "cargo area",
+          "move": "glide outside in",
+          "seconds": 2.066,
+          "file": "62565151-metadata_user_a49e074ced1e3f8a_1787289773225_f0b63e0c.mp4",
+          "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/62565151-metadata_user_a49e074ced1e3f8a_1787289773225_f0b63e0c.mp4"
+        },
+        {
+          "n": 4,
+          "id": "5379893",
+          "from": "cargo area",
+          "to": "front seats",
+          "move": "float forward",
+          "seconds": 2.066,
+          "file": "5379893-metadata_user_98a5a20831d92c04_1787289780528_61b2c753.mp4",
+          "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/5379893-metadata_user_98a5a20831d92c04_1787289780528_61b2c753.mp4"
+        },
+        {
+          "n": 5,
+          "id": "8306686",
+          "from": "front seats",
+          "to": "centre screen",
+          "move": "push in",
+          "seconds": 2.066,
+          "file": "8306686-metadata_user_25100b1446642a7d_1787289839187_60312fe2.mp4",
+          "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/8306686-metadata_user_25100b1446642a7d_1787289839187_60312fe2.mp4"
+        },
+        {
+          "n": 6,
+          "id": "60435893",
+          "from": "centre screen",
+          "to": "dashboard",
+          "move": "float forward",
+          "seconds": 2.066,
+          "file": "60435893-metadata_user_5bc8db69ff192ecf_1787289867895_be95fe8d.mp4",
+          "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/60435893-metadata_user_5bc8db69ff192ecf_1787289867895_be95fe8d.mp4"
+        },
+        {
+          "n": 7,
+          "id": "28952526",
+          "from": "dashboard",
+          "to": "rear",
+          "move": "glide inside out",
+          "seconds": 2.066,
+          "file": "28952526-metadata_user_211361feb4a50dfb_1787289854316_3d40e4e7.mp4",
+          "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/28952526-metadata_user_211361feb4a50dfb_1787289854316_3d40e4e7.mp4"
+        }
+      ]
+    }
+  }
+}

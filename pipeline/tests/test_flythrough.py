@@ -817,3 +817,63 @@ def test_landing_page_hardcodes_no_prices():
                "$500–$5,000"}                          # cited MLS penalty range
     found = set(re.findall(r"\$[\d,]+(?:–\$[\d,]+)?", src)) - allowed
     assert not found, f"hardcoded prices in the landing template: {sorted(found)}"
+
+
+# ------------------------------------------------------------------- car films
+
+
+def _car_manifest():
+    root = Path(__file__).resolve().parents[2]
+    return json.loads((root / "samples" / "cars" / "manifest.json").read_text())
+
+
+def test_car_beats_form_an_unbroken_chain():
+    """Anchoring is the whole product: beat N must end on the viewpoint beat
+    N+1 opens on. A gap here is a cut to a different-looking car."""
+    for slug, film in _car_manifest()["films"].items():
+        beats = film["beats"]
+        assert [b["n"] for b in beats] == list(range(1, len(beats) + 1)), slug
+        for a, b in zip(beats, beats[1:]):
+            assert a["to"] == b["from"], (
+                f"{slug}: beat {a['n']} ends on {a['to']!r} but "
+                f"beat {b['n']} opens on {b['from']!r}")
+
+
+def test_car_beat_ids_are_unique_across_both_films():
+    """The ingest matcher keys on these ids. A collision would silently place
+    one clip in two films, or the wrong clip in one."""
+    ids = [b["id"] for f in _car_manifest()["films"].values() for b in f["beats"]]
+    assert len(ids) == len(set(ids)) == 15
+
+
+def test_car_films_declare_a_legal_disclosure_placement():
+    from flythrough.compliance import check_placement
+    for slug, film in _car_manifest()["films"].items():
+        check_placement("vehicles", film["disclosure"])   # raises if not
+
+
+def test_car_beat_runtimes_match_their_tempo():
+    """Ad and hype tempo floor at 2s. A beat under that means the tempo scaling
+    was applied twice, which is how a film ends up unwatchably fast."""
+    for slug, film in _car_manifest()["films"].items():
+        for b in film["beats"]:
+            assert b["seconds"] >= 2.0, f"{slug} beat {b['n']}: {b['seconds']}s"
+        total = sum(b["seconds"] for b in film["beats"])
+        assert 12 <= total <= 20, f"{slug} runs {total:.1f}s"
+
+
+def test_car_ingest_matches_a_renamed_file_by_id_prefix(tmp_path):
+    """OpenArt names are long, so people rename them and browsers append ' (1)'.
+    Matching on the id prefix is what keeps an unsorted folder usable."""
+    root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(root / "samples" / "cars"))
+    import importlib
+    build = importlib.import_module("build")
+    beat = build.MANIFEST["films"]["ferrari"]["beats"][0]
+    (tmp_path / f"{beat['id']}-whatever the user renamed it (1).mp4").write_bytes(b"x")
+    build.SEARCH = (tmp_path,)
+    try:
+        found = build.find_local(beat)
+        assert found is not None and found.name.startswith(beat["id"] + "-")
+    finally:
+        build.SEARCH = (root / "samples" / "cars" / "raw", root / "samples" / "inbox")
