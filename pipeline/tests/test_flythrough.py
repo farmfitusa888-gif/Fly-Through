@@ -681,37 +681,50 @@ def test_end_card_renders(tmp_path):
 
 # --- stall trimming ---------------------------------------------------------
 
-def test_trim_removes_a_frozen_tail(tmp_path):
-    """Anchored clips decelerate into their end frame. Measured on a real 4.97s
-    clip, motion died 1.33s before the end -- 27% of the clip was a held image,
-    and a compilation of five such clips was 43.8% frozen frames."""
+def test_trim_removes_only_the_frozen_edge(tmp_path):
+    """Cut the held frame at an edge and NOTHING else.
+
+    Measured across a real five-shot tour, genuine freeze totalled 2.1s of 26.3s
+    -- runs of 0.27s to 0.70s touching an edge. Earlier versions gated on "where
+    does sustained motion begin" and removed 9.2s, five times the freeze. That
+    shortens every SHOT rather than the joins, and the result reads as sped up
+    even though playback rate never changes. An operator caught it twice.
+    """
     from flythrough.assemble import trim_stalls, _motion_profile
 
-    moving = tmp_path / "moving.mp4"
+    moving = tmp_path / "m.mp4"
     subprocess.run(
         ["ffmpeg", "-f", "lavfi", "-i", "testsrc2=s=640x360:d=3:r=30",
          "-c:v", "libx264", "-pix_fmt", "yuv420p", str(moving), "-y", "-loglevel", "error"],
         check=True)
-    frozen = tmp_path / "frozen.mp4"
+    frozen = tmp_path / "f.mp4"
     subprocess.run(
-        ["ffmpeg", "-f", "lavfi", "-i", "color=c=0x336699:s=640x360:d=2:r=30",
+        ["ffmpeg", "-f", "lavfi", "-i", "color=c=0x336699:s=640x360:d=1:r=30",
          "-c:v", "libx264", "-pix_fmt", "yuv420p", str(frozen), "-y", "-loglevel", "error"],
         check=True)
-    joined = tmp_path / "joined.mp4"
+    joined = tmp_path / "j.mp4"
     subprocess.run(
         ["ffmpeg", "-i", str(moving), "-i", str(frozen), "-filter_complex",
          "[0:v][1:v]concat=n=2:v=1[v]", "-map", "[v]", "-c:v", "libx264",
          "-pix_fmt", "yuv420p", str(joined), "-y", "-loglevel", "error"], check=True)
 
-    before = probe_duration(joined)
-    out = trim_stalls(joined, tmp_path / "trimmed.mp4")
-    after = probe_duration(out)
-    assert after < before - 1.0, f"frozen tail not removed: {before} -> {after}"
+    out = trim_stalls(joined, tmp_path / "o.mp4")
+    removed = probe_duration(joined) - probe_duration(out)
+    # The frozen second should go; the three moving seconds must survive.
+    assert 0.6 < removed < 1.6, f"removed {removed:.2f}s, expected ~1s of freeze"
+    assert probe_duration(out) > 2.5, "ate into the moving footage"
 
-    pf = _motion_profile(out)
-    sustained = sorted(pf)[int(len(pf) * 0.7)]
-    tail = sum(pf[-5:]) / 5
-    assert tail > sustained * 0.15, "tail still frozen after trim"
+
+def test_trim_leaves_a_clip_with_no_frozen_edge_alone(tmp_path):
+    """A clip that moves all the way to both edges must come back untouched."""
+    from flythrough.assemble import trim_stalls
+    src = tmp_path / "all_moving.mp4"
+    subprocess.run(
+        ["ffmpeg", "-f", "lavfi", "-i", "testsrc2=s=640x360:d=3:r=30",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src), "-y", "-loglevel", "error"],
+        check=True)
+    out = trim_stalls(src, tmp_path / "o.mp4")
+    assert probe_duration(out) == pytest.approx(probe_duration(src), abs=0.2)
 
 
 def test_trim_never_guts_a_short_clip(tmp_path):
@@ -737,3 +750,4 @@ def test_trim_has_no_arbitrary_cap(tmp_path):
     assert "max_trim" not in params
     assert "max_trim_fraction" not in params
     assert "keep_min" in params
+    assert "min_run" in params

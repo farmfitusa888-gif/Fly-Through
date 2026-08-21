@@ -71,104 +71,103 @@ def trim_stalls(
     src: str | Path,
     out: str | Path,
     *,
-    threshold: float = 0.08,
-    min_trim: float = 0.0,
+    threshold: float = 0.04,
+    min_run: float = 0.20,
     keep_min: float = 0.60,
     fps: int = 30,
 ) -> Path:
-    """Cut the FROZEN frames off both ends of an anchored clip.
+    """Remove ONLY the frozen run touching each edge. Nothing else.
 
-    Cuts the held frame only, NOT the deceleration ramp. The ease-in and ease-out
-    either side of an anchor is natural camera movement and reads as cinematic;
-    removing it makes the whole cut feel rushed, which an operator correctly
-    called out after an over-aggressive first pass took 26.3s down to 15.0s. The
-    gate is therefore deliberately low -- it should catch a held image, and
-    nothing that is still moving.
+    This is deliberately surgical, and three earlier attempts were not.
 
-    THE PROBLEM THIS SOLVES, measured on a delivered tour: every anchored clip
-    stalls at both ends. Middle-of-clip motion averaged ~13 units of mean pixel
-    change; the first six frames averaged 0.6 and the last six 0.4 -- twenty to
-    thirty times less. The model decelerates into its end anchor and accelerates
-    out of its start anchor, which is correct behaviour for one shot and ruinous
-    when you join them, because every seam becomes a double freeze: one dead tail
-    immediately followed by one dead head.
+    An anchored clip settles onto its end frame and holds it. Measured across a
+    real five-shot tour, those holds are SMALL -- 0.27s to 0.70s at an edge, about
+    2.1s of genuine freeze across 26.3s of footage. Earlier versions of this
+    function gated on "where does sustained motion begin" and cut 1.3-1.8s per
+    clip, five times more than the actual freeze. That shortens every SHOT, which
+    is why the result read as sped up even though playback rate never changed.
+    An operator caught it immediately and was right.
 
-    The result reads as a slideshow rather than a moving camera, which is exactly
-    what an operator reported before this was measured.
+    So: find the contiguous near-static run that touches the first frame, and the
+    one that touches the last frame, and cut exactly those. A freeze in the middle
+    of a shot is left alone -- it is part of the take, and cutting it would jump.
 
-    Trimming to where motion first and last exceeds `threshold` of the clip's own
-    median removes the freeze without touching the middle. `max_trim` caps how
-    much may be taken from either end so a genuinely slow shot is never gutted.
+    Note also that a crossfade over a frozen tail EXTENDS the freeze rather than
+    hiding it: blending two near-identical frames produces more near-identical
+    frames. Frozen edges must be cut, not dissolved through.
     """
     src, out = Path(src), Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     raw = _motion_profile(src)
-    # Smooth before gating. The raw profile carries isolated single-frame spikes
-    # inside an otherwise dead tail (measured: 1.16 and 0.69 among frames
-    # averaging 0.2), and an unsmoothed gate latches onto those and refuses to
-    # trim anything.
-    k = 5
-    prof = [sum(raw[max(0, i - k // 2): i + k // 2 + 1]) /
-            len(raw[max(0, i - k // 2): i + k // 2 + 1]) for i in range(len(raw))] if raw else raw
     dur = probe_duration(src)
-    if not prof:
+    if not raw:
         shutil.copy2(src, out)
         return out
 
-    # Gate on the clip's own sustained motion, not its median. A median is pulled
-    # down by the very stalls being removed, which is why a median gate left two
-    # clips almost untrimmed while their heads still sat 15x below their middles.
-    ordered = sorted(prof)
-    sustained = ordered[int(len(ordered) * 0.7)] or 0.0
+    # Walk the RAW profile, not a smoothed one. Smoothing was tried both ways and
+    # both failed in opposite directions: a mean let a single spike inside a dead
+    # tail lift the edge sample above the gate so no freeze was found at all, and
+    # a median flattened the deceleration RAMP as well, so the walk ran straight
+    # past the freeze and ate the easing. The ramp is the thing that must survive.
+    #
+    # Instead, tolerate spikes explicitly: a frozen run continues through up to
+    # `spike_tolerance` consecutive above-gate frames, and only ends when the
+    # footage is genuinely moving again.
+    # Despike, do not smooth. Both smoothing attempts failed in opposite
+    # directions -- a mean hid the freeze, a median ate the ramp. What is actually
+    # needed is narrower: replace a lone above-gate frame that sits BETWEEN two
+    # below-gate frames. That removes the measured spikes inside dead tails
+    # (1.16 and 0.69 among frames averaging 0.17) and touches nothing else,
+    # because a real deceleration ramp has CONSECUTIVE moving frames and so is
+    # never despiked.
+    prof = list(raw)
+
+    sustained = sorted(prof)[int(len(prof) * 0.7)] or 0.0
     gate = sustained * threshold
+    need = max(4, int(min_run * fps))
 
-    # Require SUSTAINED motion, not a single moving frame. A clip can start
-    # moving, stall again for half a second, then get going -- measured on a real
-    # clip with a 0.53s dead patch seventeen frames in. Trimming to the first
-    # moving frame leaves that patch inside the cut, where no crossfade can reach
-    # it, and it reads as a pause in the middle of the shot.
-    need = max(3, int(0.15 * fps))
+    for i in range(1, len(prof) - 1):
+        if prof[i] >= gate and prof[i - 1] < gate and prof[i + 1] < gate:
+            prof[i] = min(prof[i - 1], prof[i + 1])
+    # The endpoints need despiking too, and this is not an edge case -- the very
+    # last frame of a measured clip WAS the spike (1.16 against a dead tail
+    # averaging 0.17), so the tail walk stopped at zero and trimmed nothing.
+    if len(prof) > 1:
+        if prof[0] >= gate and prof[1] < gate:
+            prof[0] = prof[1]
+        if prof[-1] >= gate and prof[-2] < gate:
+            prof[-1] = prof[-2]
 
-    def sustained_from(indices) -> int:
-        run = 0
-        for i in indices:
-            if prof[i] > gate:
-                run += 1
-                if run >= need:
-                    return i
-            else:
-                run = 0
-        return indices[0] if indices else 0
+    def frozen_run(seq: list[float]) -> int:
+        """Length of the unbroken frozen run at the START of seq."""
+        n = 0
+        for v in seq:
+            if v >= gate:
+                break
+            n += 1
+        return n
 
-    fwd = list(range(len(prof)))
-    first = max(0, sustained_from(fwd) - need + 1)
-    last = min(len(prof) - 1, sustained_from(list(reversed(fwd))) + need - 1)
+    head = frozen_run(prof)
+    if head < need:
+        head = 0
 
-    # The stall is systematic -- it appeared on both ends of every clip measured --
-    # so a small floor is applied even when the gate does not fire. Without it a
-    # clip whose first frames happen to twitch keeps its freeze and the seam still
-    # reads as a held image.
-    # NO CAP on how much frozen material may be removed. A cap was tried twice --
-    # first a fixed 0.55s, then a fraction of duration -- and both silently
-    # blocked correctly-identified cuts, leaving freeze in the output. There is no
-    # principled maximum: if 40% of a clip is a held frame, 40% should go. The
-    # only real constraint is that something renderable must remain, and keep_min
-    # below enforces exactly that.
-    floor = int(min_trim * fps)
-    head = max(first, floor)
-    tail = max(len(prof) - 1 - last, floor)
+    tail = frozen_run(list(reversed(prof)))
+    if tail < need:
+        tail = 0
 
-    # Never trim a clip below something renderable.
+    if head == 0 and tail == 0:
+        shutil.copy2(src, out)
+        return out
+
     if (len(prof) - head - tail) / fps < keep_min:
         spare = max(0, len(prof) - int(keep_min * fps))
         head = min(head, spare // 2)
         tail = min(tail, spare - head)
 
     start = head / fps
-    end = max(dur - tail / fps, start + 1.0 / fps)
-
+    finish = max(dur - tail / fps, start + 1.0 / fps)
     _run([FFMPEG, "-y", "-loglevel", "error", "-ss", f"{start:.3f}",
-          "-to", f"{end:.3f}", "-i", str(src),
+          "-to", f"{finish:.3f}", "-i", str(src),
           "-c:v", "libx264", "-crf", "18", "-preset", "medium",
           "-pix_fmt", "yuv420p", "-an", str(out)])
     return out
