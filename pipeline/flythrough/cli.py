@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 from .assemble import deliver
+from .compliance import CAPTION, make_card, make_qr
 from .cost import USD_PER_CREDIT_VERIFIED, quote
 from .planner import build_plan
 from .render import OpenArtAdapter, build_jobs, write_manifest
@@ -75,17 +76,51 @@ def cmd_manifest(a: argparse.Namespace) -> int:
 
 
 def cmd_assemble(a: argparse.Namespace) -> int:
+    """Assemble downloaded clips into the delivery set.
+
+    This is the primary path, not a fallback. Provider CDNs are frequently
+    unreachable behind corporate egress policies, so the reliable workflow is to
+    download the rendered clips from the provider's own UI, drop them in a
+    folder, and run this. Nothing here touches the network.
+    """
     clips = sorted(Path(a.clips).glob("*.mp4"))
     if not clips:
         print(f"no .mp4 clips found in {a.clips}", file=sys.stderr)
+        print("  Download the rendered shots from your provider and put them here,",
+              file=sys.stderr)
+        print("  named so they sort into tour order (part_1.mp4, part_2.mp4, ...).",
+              file=sys.stderr)
         return 1
-    d = deliver(clips, a.out, slug=_slug(a.listing), crossfade=a.crossfade,
+
+    slug = _slug(a.listing)
+    outdir = Path(a.out)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    # The disclosure card leads the master, because a caption does not survive
+    # a re-post but a burned-in frame does.
+    sequence: list[Path] = []
+    if a.disclosure_url:
+        sequence.append(make_card(a.disclosure_url, outdir / "_card.mp4",
+                                  seconds=2.5, fps=a.fps))
+        make_qr(a.disclosure_url, outdir / f"{slug}_originals_qr.png")
+    sequence += clips
+
+    d = deliver(sequence, outdir, slug=slug, crossfade=a.crossfade, fps=a.fps,
                 music=a.music, make_vertical=not a.no_vertical)
-    print(f"  master   {d.master}  ({d.duration:.1f}s)")
-    if d.vertical:
-        print(f"  vertical {d.vertical}")
+    (outdir / "_card.mp4").unlink(missing_ok=True)
+
+    print(f"  master    {d.master.name}  ({d.duration:.1f}s)  [archive, CRF 18]")
+    if d.master_web:
+        print(f"  master    {d.master_web.name}  [SEND THIS -- web/MLS]")
+    if d.vertical_web:
+        print(f"  vertical  {d.vertical_web.name}  [SEND THIS -- Reels/TikTok]")
     if d.thumbnail:
-        print(f"  thumb    {d.thumbnail}")
+        print(f"  thumb     {d.thumbnail.name}")
+    if a.disclosure_url:
+        print(f"  qr        {slug}_originals_qr.png")
+        print()
+        print("  MLS remark to paste:")
+        print(f"    {CAPTION.format(url=a.disclosure_url)}")
     return 0
 
 
@@ -116,7 +151,13 @@ def main(argv: list[str] | None = None) -> int:
     asm.add_argument("clips")
     asm.add_argument("--listing", required=True)
     asm.add_argument("--out", default="delivery")
-    asm.add_argument("--crossfade", type=float, default=0.4)
+    asm.add_argument("--crossfade", type=float, default=0.2,
+                     help="0.2s suits anchored shots; 0 gives true hard cuts")
+    asm.add_argument("--fps", type=int, default=30,
+                     help="match the source renders to avoid judder")
+    asm.add_argument("--disclosure-url", dest="disclosure_url",
+                     help="URL of the unaltered-originals page; adds the burned-in "
+                          "card, the QR and the MLS caption")
     asm.add_argument("--music")
     asm.add_argument("--no-vertical", action="store_true")
     asm.set_defaults(fn=cmd_assemble)

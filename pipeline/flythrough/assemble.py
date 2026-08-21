@@ -52,6 +52,8 @@ class Deliverables:
     vertical: Path | None
     thumbnail: Path | None
     duration: float
+    master_web: Path | None = None      # what gets sent to the client
+    vertical_web: Path | None = None
 
 
 def concat(
@@ -172,6 +174,22 @@ def add_music(master: str | Path, music: str | Path, out: str | Path, *, fade_ou
     return out
 
 
+def web_encode(src: str | Path, out: str | Path, *, crf: int = 21) -> Path:
+    """Re-encode for delivery: smaller file, instant streaming.
+
+    A CRF-18 master runs ~12 Mbps, which is too heavy to email and over the
+    upload limit on several MLS platforms. CRF 21 with faststart lands near
+    8 Mbps with no visible loss and starts playing before it finishes loading,
+    because the moov atom moves to the front of the file.
+    """
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    _run([FFMPEG, "-y", "-loglevel", "error", "-i", str(src),
+          "-c:v", "libx264", "-crf", str(crf), "-preset", "medium",
+          "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", str(out)])
+    return out
+
+
 def deliver(
     clips: list[str | Path],
     outdir: str | Path,
@@ -195,9 +213,16 @@ def deliver(
     vertical = to_vertical(master, outdir / f"{slug}_vertical_9x16.mp4") if make_vertical else None
     thumb = thumbnail(master, outdir / f"{slug}_thumb.jpg") if make_thumb else None
 
+    # Web/MLS encodes are what actually get sent; the CRF-18 masters are archive.
+    master_web = web_encode(master, outdir / f"{slug}_master_web.mp4")
+    vertical_web = (web_encode(vertical, outdir / f"{slug}_vertical_web.mp4")
+                    if vertical else None)
+
     return Deliverables(
         master=master,
         vertical=vertical,
         thumbnail=thumb,
         duration=probe_duration(master),
+        master_web=master_web,
+        vertical_web=vertical_web,
     )

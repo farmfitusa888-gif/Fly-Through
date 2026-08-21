@@ -71,10 +71,20 @@ PYTHONPATH=pipeline python3 -m flythrough.cli plan ./photos \
 PYTHONPATH=pipeline python3 -m flythrough.cli manifest plans/1420-cedar-ridge.plan.json \
     --photos ./photos
 
-# 3. Rendered clips -> delivered files (free, local ffmpeg)
+# 3. Rendered clips -> the whole delivery set (free, local ffmpeg, no network)
 PYTHONPATH=pipeline python3 -m flythrough.cli assemble ./clips \
-    --listing "1420 Cedar Ridge Rd" --music bed.m4a
+    --listing "1420 Cedar Ridge Rd" \
+    --disclosure-url "https://flythrough.co/o/1420-cedar-ridge"
 ```
+
+**Download the rendered clips from your provider's UI and drop them in `./clips`,
+named so they sort into tour order** (`part_1.mp4`, `part_2.mp4`, …). This is the
+primary path, not a fallback: provider CDNs are routinely unreachable behind
+corporate egress policies — both machines used to build this project were blocked
+from `cdn.openart.ai` — and `assemble` touches the network not at all.
+
+One command produces the burned-in disclosure card, the archive master, the
+web/MLS encode, the 9:16 vertical, the thumbnail, the QR, and the MLS remark text.
 
 Photos are labelled by filename (`04_great-room.jpg`, `IMG_4471 front
 elevation.jpg`) or by a `rooms.json` sidecar mapping filename → room, which wins
@@ -119,8 +129,8 @@ completeness.
 ## Honesty about what is and isn't proven
 
 - Costs marked `[VERIFIED]` were read from the provider's own pricing tool.
-- The USD-per-credit figure is **an unverified estimate**; the provider's pricing
-  page was unreachable from the build environment. The model survives a 5× error.
+- The USD-per-credit figure is **confirmed**: 5,000 credits for $15 = $0.0030,
+  the top-up rate, which is the correct one to model with at any real volume.
 - Conversion, reply, re-roll and operator-time figures are **assumptions**, marked
   as such, listed in `business/99-sources.md` with what would replace them.
 - Output quality on **real** agent photography with mixed white balance is the

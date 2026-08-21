@@ -14,7 +14,14 @@ exposure pop at the seam between two anchor photos.
 *If it fails:* normalise white balance across anchor pairs before submission — an
 upstream fix, not a grade on the output.
 
-**2. What does an OpenArt credit actually cost?** — NARROWED, still not confirmed.
+**2. What does an OpenArt credit actually cost?** — ✅ **CLOSED 2026-08-21.**
+Confirmed by the account holder: **5,000 credits for $15 = $0.0030/credit**, which
+is exactly the rate the model already used. Every margin figure in this buildout
+stands as published. The detail below is retained for how the blended rate moves
+with volume.
+
+<details><summary>Original open question</summary>
+
 `openart.ai` is blocked from the build environment, so this cannot be read
 directly. Two market figures bracket it: a subscription at ~12,000 credits for
 ~$14.50/mo ($0.00121/cr) and add-on packs at $15/5,000 ($0.0030/cr).
@@ -26,6 +33,7 @@ blended rate lands near **$0.0027/cr** and the marginal rate is **$0.0030/cr**.
 `cost.py` uses the marginal rate deliberately: it is the higher of the two, so
 every margin figure in this buildout is conservative rather than optimistic.
 *To close:* divide one real top-up receipt — dollars paid ÷ credits received.
+</details>
 
 **3. Will agents pay $249, and does the free sample convert at 20%?**
 Entirely unvalidated. It is the central business question.

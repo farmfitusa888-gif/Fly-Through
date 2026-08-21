@@ -35,12 +35,12 @@ DUAL_ANCHOR: frozenset[str] = frozenset({
     "byte-plus-seedance-2-5", "pixverseV6",
 })
 
-# USD per OpenArt credit. Derived from the widely-reported $15 / 5,000-credit
-# add-on pack (= $0.0030/credit). NOT verified against openart.ai directly --
-# that domain was unreachable from the build environment. Treat as an estimate
-# and confirm before any client quote depends on it.
+# USD per OpenArt credit. CONFIRMED by the account holder 2026-08-21:
+# 5,000 credits for $15 = $0.0030/credit. This is the top-up (marginal) rate,
+# which is the correct one to model with -- at any real volume the subscription
+# allowance is exhausted and every further credit costs exactly this.
 USD_PER_CREDIT: float = 0.0030
-USD_PER_CREDIT_VERIFIED: bool = False
+USD_PER_CREDIT_VERIFIED: bool = True
 
 # Share of shots that get re-rendered because the first take drifted. Set from
 # observed rework once you have run 20+ real jobs; until then this is the
