@@ -95,6 +95,24 @@ Why them first:
 new-construction developers, property management, hospitality. Revisit once 30+
 individual agents have paid, per `business/06-roadmap.md`.
 
+### The pipeline is a generic tool with a taxonomy bolted on
+
+Worth stating because it changes what this business can become. Of ten pipeline
+modules, **seven port to a new vertical untouched**. Only the taxonomy and the
+disclosure basis are vertical-specific, because both were built as DATA rather
+than logic scattered through the code. `vehicles.py` proves it: a full
+auto-dealer taxonomy, and `viewpoint.py` validates a car walkaround without a
+single change — left-to-right across a vehicle is impossible in one camera move
+for the same geometric reason as front-to-back across a house.
+
+**Brand accordingly: broad brand, narrow product.** A flythrough of a house, a
+car or a product is still a flythrough, so the product name is vertical-neutral
+without being vague. The studio that sells other services needs its own name;
+putting every service on one menu is what makes a generalist unsellable — and,
+critically, unresellable. A reseller needs one price, one deliverable, one
+turnaround, one stated margin, one sentence and one buyer they already know.
+A productized offer has all six. A service menu has none.
+
 ## 5. The compliance wedge — the most defensible part of the business
 
 This is where a serious operator separates from the flood of AI-video hustlers.

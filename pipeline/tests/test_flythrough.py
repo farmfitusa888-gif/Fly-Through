@@ -491,3 +491,54 @@ def test_guide_states_the_required_anchors_it_gets_from_code():
     plain = {"exterior": "front of the house", "living": "living room", "kitchen": "kitchen"}
     for anchor in REQUIRED_ANCHORS:
         assert plain[anchor] in agent, f"{anchor} missing from the agent guide"
+
+
+# --- vehicle taxonomy (auto-dealer vertical) --------------------------------
+
+VEHICLE_LABELS = {
+    "01_three-quarter-front": "hero", "02_driver-side-profile": "driver_side",
+    "03_rear": "rear", "04_wheel-detail": "wheels", "05_engine-bay": "engine",
+    "06_door-open": "door_open", "07_dashboard": "dash",
+    "08_front-seats": "front_seats", "09_infotainment-screen": "infotainment",
+    "10_trunk": "cargo", "11_odometer-miles": "odometer", "12_vin-sticker": "vin",
+    "13_rear-seats": "rear_seats", "passenger side": "passenger_side",
+    "grille closeup": "front", "random-thing": "other",
+}
+
+
+@pytest.mark.parametrize("label,expected", sorted(VEHICLE_LABELS.items()))
+def test_vehicle_resolution(label, expected):
+    from flythrough.vehicles import resolve as vresolve
+    assert vresolve(label).key == expected
+
+
+def test_vehicle_resolve_never_returns_none():
+    """An odd dealer filename must not crash a job or lose a frame."""
+    from flythrough.vehicles import resolve as vresolve
+    for junk in ("", "   ", "!!!", "1234", "zzzz-qqqq"):
+        p = vresolve(junk)
+        assert p is not None and p.key == "other"
+
+
+def test_vehicle_proof_shots_are_never_hero():
+    from flythrough.vehicles import resolve as vresolve
+    for label in ("odometer", "vin", "undercarriage", "wheels"):
+        assert not vresolve(label).hero_eligible
+
+
+def test_vehicle_taxonomy_matches_the_rooms_contract():
+    """Same interface, so the planner cannot tell which vertical it was given."""
+    from flythrough import rooms, vehicles
+    for name in ("TOUR_ORDER", "ALIASES", "NON_HERO", "INTERIOR", "UNKNOWN", "resolve"):
+        assert hasattr(vehicles, name), f"vehicles.{name} missing"
+    a, b = rooms.resolve("kitchen"), vehicles.resolve("dash")
+    for attr in ("key", "rank", "interior", "is_known", "hero_eligible"):
+        assert hasattr(a, attr) and hasattr(b, attr)
+
+
+def test_viewpoint_ports_to_vehicles_unchanged():
+    """Left-to-right across a car is as impossible as front-to-back on a house."""
+    from flythrough.viewpoint import assess
+    risks = assess([("driver_side", "left", "passenger_side", "right")])
+    assert risks and risks[0].severity == "block"
+    assert assess([("dash", "inside", "front_seats", "inside")]) == []

@@ -57,10 +57,28 @@ Ranked by expected value, and deliberately **not started early**:
    still being discovered. This is the "productize later" half of the strategy.
 2. **White-label for brokerages.** Their branding, our pipeline, per-seat pricing.
    The natural evolution of the photographer partnership.
-3. **Vertical expansion**, in this order: land and acreage (drone is genuinely
-   hard there, so our advantage is largest), then venues and short-term rentals,
-   then new-construction developers.
-4. **True 3D**, via Gaussian splatting from a walkaround video. A different and
+3. **Auto dealers — the strongest adjacent vertical, ahead of everything else.**
+   Taxonomy already built (`pipeline/flythrough/vehicles.py`, tested). Dealers
+   beat listing agents on every axis that matters:
+   - They already photograph every unit systematically, 20–40 frames to a house
+     standard, so the intake problem is solved before we arrive.
+   - The walkaround video is an established format buyers expect — we undercut a
+     cost rather than create a category.
+   - One dealer group with 300 units in stock is worth ~30 individual agents,
+     and it is **one** relationship instead of thirty.
+   - Stock turns over continuously, so it is recurring by nature rather than
+     per-transaction.
+
+   **The compliance basis is different and must not be copied.** Vehicle
+   advertising falls under FTC truth-in-advertising rules and state dealer
+   advertising regulations, which vary considerably. `compliance.py` encodes
+   NAR Article 12 and California AB 723 — real-estate law. Do not reuse it here
+   without a lawyer in the operating state.
+
+4. **Then**: land and acreage (real drones are hardest there, so our relative
+   advantage is largest), venues and short-term rentals, then products and
+   e-commerce — biggest market, but lowest ticket and most competition, so last.
+5. **True 3D**, via Gaussian splatting from a walkaround video. A different and
    much stronger product — arbitrary camera paths, an interactive viewer, no
    drift at all. Revisit only when GPU cost and customer capture effort both
    justify it. **Do not start here**; the current mechanism reaches revenue
