@@ -17,7 +17,7 @@ than it sounds: the beats are all ~2s of the same car, and a human ordering them
 by eye will get it wrong.
 
 No disclosure card. Vehicle advertising has no altered-image rule to satisfy --
-see business/07-compliance.md -- and compliance.check_placement enforces that
+see business/05-compliance.md -- and compliance.check_placement enforces that
 "none" stays unavailable to real estate.
 """
 

@@ -1,0 +1,51 @@
+<title>FlyThrough</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--bg:#F6F8FA;--card:#FFF;--ink:#141D26;--ink2:#41505F;--muted:#6E7C8A;
+--rule:#DDE3EA;--blue:#21528C;--blue-soft:#E8EFF7}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#0E1319;
+--card:#161D25;--ink:#E7ECF1;--ink2:#B3BFCB;--muted:#8494A3;--rule:#26303B;
+--blue:#7FADE4;--blue-soft:#16233250}}
+:root[data-theme=dark]{--bg:#0E1319;--card:#161D25;--ink:#E7ECF1;--ink2:#B3BFCB;
+--muted:#8494A3;--rule:#26303B;--blue:#7FADE4;--blue-soft:#16233250}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+font:400 17px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:680px;margin:0 auto;padding:56px 22px 80px}
+h1{font-size:2.1rem;letter-spacing:-.02em;margin:0 0 10px;text-wrap:balance}
+.lede{font-size:1.15rem;color:var(--ink2);margin:0 0 34px}
+.card{background:var(--card);border:1px solid var(--rule);border-left:3px solid var(--blue);
+border-radius:0 10px 10px 0;padding:20px 24px;margin:0 0 22px}
+.card h2{font-size:.75rem;letter-spacing:.12em;text-transform:uppercase;
+color:var(--blue);margin:0 0 10px}
+.card p{margin:0 0 10px;color:var(--ink2);font-size:.98rem}.card p:last-child{margin:0}
+a{color:var(--blue)}
+footer{margin-top:48px;padding-top:20px;border-top:1px solid var(--rule);
+color:var(--muted);font-size:.87rem}
+</style>
+<div class="wrap">
+  <h1>FlyThrough</h1>
+  <p class="lede">Drone-style video from photos you already have</p>
+
+  <div class="card">
+    <h2>What this site is for</h2>
+    <p>Every video we produce links here, to the <strong>original, unaltered
+    photographs</strong> the video was built from.</p>
+    <p>That link is not a courtesy. Under California Business &amp; Professions
+    Code &sect;10140.8, a digitally altered image in a real-estate advertisement
+    must carry a conspicuous notice <em>and</em> a link to the unaltered original
+    by URL or QR code. NAR&rsquo;s Code of Ethics, Article 12, requires the same
+    disclosure nationally.</p>
+  </div>
+
+  <div class="card">
+    <h2>How the video is made</h2>
+    <p>Each shot begins and ends on a real photograph of the property. The AI
+    generates only the camera travel between two genuine frames &mdash; it is
+    never asked what the building looks like.</p>
+    <p>We do not retouch, stage or colour-correct anything a client sends. The
+    photographs on these pages are the files we received.</p>
+  </div>
+
+  <footer><a href="/">iflythroughit.com</a> &middot; <a href="mailto:hello@iflythroughit.com">hello@iflythroughit.com</a></footer>
+</div>

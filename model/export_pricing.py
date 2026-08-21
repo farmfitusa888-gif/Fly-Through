@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / "model"))
 sys.path.insert(0, str(ROOT / "pipeline"))
 
 from ad_pricing import BANDS, LOT_PLANS, PRODUCTS            # noqa: E402
+from catalog import CATALOG, INTAKE                          # noqa: E402
 from unit_economics import RETAINER_LISTINGS, RETAINER_PRICE, TIERS  # noqa: E402
 
 OUT = ROOT / "site" / "pricing.json"
@@ -79,11 +80,21 @@ VEHICLE_COPY = {
 FEATURED = {"Listing Pro", "Ad cut - premium"}
 
 
+def sku_for(name: str) -> str:
+    """Link a displayed card to the SKU that takes the money. Exact-name match,
+    and it raises rather than silently rendering a card nobody can buy."""
+    hits = [c.id for c in CATALOG if c.name == name]
+    if len(hits) != 1:
+        raise KeyError(f"{name!r} matches {len(hits)} SKUs; the catalogue and "
+                       f"the price models have drifted apart")
+    return hits[0]
+
+
 def build() -> dict:
     prop = []
     for t in TIERS:
         per, bullets = PROPERTY_COPY[t.name]
-        prop.append({"name": t.name, "price": t.price, "per": per,
+        prop.append({"sku": sku_for(t.name), "name": t.name, "price": t.price, "per": per,
                      "bullets": bullets, "featured": t.name in FEATURED,
                      "note": t.note})
 
@@ -91,7 +102,7 @@ def build() -> dict:
     for p in PRODUCTS:
         per, bullets = VEHICLE_COPY[p.name]
         m = p.margin()
-        veh.append({"name": p.name, "price": p.price, "per": per,
+        veh.append({"sku": sku_for(p.name), "name": p.name, "price": p.price, "per": per,
                     "bullets": bullets, "featured": p.name in FEATURED,
                     "note": p.note, "seconds": p.seconds, "beats": p.beats,
                     "render_usd": round(m["render"], 2)})
@@ -105,10 +116,18 @@ def build() -> dict:
         "property": prop,
         "vehicle": veh,
         "bands": bands,
-        "retainer": {"price": RETAINER_PRICE, "listings": RETAINER_LISTINGS,
+        "retainer": {"sku": "re-retainer",
+                     "price": RETAINER_PRICE, "listings": RETAINER_LISTINGS,
                      "per_listing": round(RETAINER_PRICE / RETAINER_LISTINGS, 2)},
-        "lot_plans": [{"name": lp.name, "units": lp.units, "price": lp.price,
+        "lot_plans": [{"sku": f"lot-{lp.units}", "name": lp.name,
+                       "units": lp.units, "price": lp.price,
                        "per_unit": round(lp.per_unit, 2)} for lp in LOT_PLANS],
+        "catalog": [{"id": s.id, "name": s.name, "price": s.price,
+                     "mode": s.mode, "vertical": s.vertical,
+                     "turnaround": s.turnaround, "quantity": s.quantity,
+                     "unit_price": round(s.unit_price, 2),
+                     "blurb": s.blurb, "tags": list(s.tags)} for s in CATALOG],
+        "intake": INTAKE,
     }
 
 
@@ -118,4 +137,5 @@ if __name__ == "__main__":
     print(f"  wrote {OUT}")
     print(f"    {len(data['property'])} property tiers, "
           f"{len(data['vehicle'])} vehicle products, {len(data['bands'])} bands, "
-          f"{len(data['lot_plans'])} lot plans")
+          f"{len(data['lot_plans'])} lot plans, "
+          f"{len(data['catalog'])} sellable SKUs")

@@ -4,3 +4,7 @@ requests>=2.31
 # Development
 pytest>=8.0
 segno>=1.6
+# Site build only: renders the generated shot-guide markdown into pages.
+# site/build_guides.py exits with a clear message rather than a traceback if
+# this is absent, and no other build step needs it.
+markdown>=3.5

@@ -127,14 +127,15 @@ p{max-width:66ch}
 
 /* ---------- pricing ---------- */
 .tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:40px}
-.tier{background:var(--card);border:1px solid var(--rule);border-radius:4px;padding:32px 26px}
+.tier{background:var(--card);border:1px solid var(--rule);border-radius:4px;
+  padding:32px 26px;display:flex;flex-direction:column}
 .tier.feature{border-color:var(--ember);background:#17120D}
 .tier .name{font-family:"JetBrains Mono",monospace;font-size:.72rem;letter-spacing:.2em;
   text-transform:uppercase;color:var(--dim);margin:0 0 14px}
 .tier.feature .name{color:var(--ember)}
 .tier .price{font-family:"Anton",sans-serif;font-size:3rem;line-height:1;margin:0 0 4px}
 .tier .per{color:var(--faint);font-size:.86rem;margin:0 0 22px}
-.tier ul{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:10px}
+.tier ul{list-style:none;padding:0;margin:0 0 auto;display:flex;flex-direction:column;gap:10px}
 .tier li{font-size:.93rem;color:var(--dim);display:grid;grid-template-columns:14px 1fr;gap:10px}
 .tier li b{color:var(--ember);font-weight:400}
 .tiers.four{grid-template-columns:repeat(4,1fr);gap:14px}
@@ -160,6 +161,19 @@ p{max-width:66ch}
   font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
 @media(max-width:900px){.tiers,.tiers.four{grid-template-columns:1fr}
   .bands td.why{display:none}}
+
+/* ---------- buy ---------- */
+.buy{display:inline-flex;align-items:center;gap:8px;margin-top:22px;
+  background:var(--ember);color:#120A04;font-family:"Anton",sans-serif;
+  text-transform:uppercase;letter-spacing:.04em;font-size:.9rem;
+  padding:11px 20px;border-radius:2px;text-decoration:none;
+  transition:transform .16s,background .16s;white-space:nowrap}
+.buy:hover{transform:translateY(-1px);background:#EE873F}
+.buy:focus-visible{outline:2px solid var(--paper);outline-offset:3px}
+.buy.ghost{background:none;color:var(--paper);border:1px solid var(--faint)}
+.buy.ghost:hover{background:rgba(255,255,255,.05)}
+.tier .buy{width:100%;justify-content:center}
+.bands .buy{margin-top:0;font-size:.76rem;padding:8px 14px}
 
 /* ---------- doors ---------- */
 .doors{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:44px 0 0;text-align:left}
@@ -241,6 +255,27 @@ def money(v: float) -> str:
     return f"${v:,.0f}" if float(v).is_integer() else f"${v:,.2f}"
 
 
+PAY = CONFIG.get("payments", {})
+LINKS = PAY.get("links", {})
+
+
+def buy(sku: str, label: str = "Buy") -> str:
+    """A Buy button when the SKU has a payment link, the email path when it does
+    not. Never a dead button: an unclickable price is worse than no price, and a
+    button that 404s after someone decides to spend money is worse than both.
+
+    Payment Links are public URLs with no key in them, which is what lets a
+    static page take money with no backend to secure."""
+    href = LINKS.get(sku, "")
+    if href:
+        return (f'<a class="buy" href="{href}" data-sku="{sku}">{label} '
+                f'<span aria-hidden="true">&rarr;</span></a>')
+    subj = f"Order — {sku}"
+    return (f'<a class="buy ghost" href="mailto:{CONFIG["contact_email"]}'
+            f'?subject={subj.replace(" ", "%20").replace("—", "%E2%80%94")}">'
+            f'Order by email <span aria-hidden="true">&rarr;</span></a>')
+
+
 def tier_cards(rows: list[dict], *, four: bool = False) -> str:
     """Render priced cards straight from pricing.json. No number is typed here."""
     cards = []
@@ -252,7 +287,8 @@ def tier_cards(rows: list[dict], *, four: bool = False) -> str:
         cards.append(
             f'<div class="{cls}"><p class="name">{name}</p>'
             f'<p class="price">{money(r["price"])}</p>'
-            f'<p class="per">{r["per"]}</p><ul>{bullets}</ul></div>')
+            f'<p class="per">{r["per"]}</p><ul>{bullets}</ul>'
+            f'{buy(r["sku"])}</div>')
     grid = "tiers four" if four else "tiers"
     return f'<div class="{grid}">{"".join(cards)}</div>'
 
@@ -262,10 +298,12 @@ def lot_table(rows: list[dict]) -> str:
         f'<tr><td class="b">{r["name"]}</td>'
         f'<td>{r["units"]} vehicles a month</td>'
         f'<td class="why">{money(r["per_unit"])} a vehicle</td>'
-        f'<td class="p">{money(r["price"])}<span>/mo</span></td></tr>' for r in rows)
+        f'<td class="p">{money(r["price"])}<span>/mo</span></td>'
+        f'<td style="text-align:right">{buy(r["sku"], "Subscribe")}</td></tr>'
+        for r in rows)
     return (f'<table class="bands"><tr><th>Plan</th><th>Volume</th>'
             f'<th class="why">Effective rate</th>'
-            f'<th style="text-align:right">Monthly</th></tr>{body}</table>')
+            f'<th style="text-align:right">Monthly</th><th></th></tr>{body}</table>')
 
 
 def band_table(rows: list[dict]) -> str:
@@ -515,7 +553,8 @@ def build() -> Path:
       </div>
     </div>
 
-    <p class="mono" style="color:var(--faint);font-size:.8rem;margin:36px auto 0">{email} · {domain} · {short_domain}</p>
+    <p class="note" style="color:var(--dim);font-size:.94rem;margin:34px auto 0;max-width:56ch">Not sure your photos are good enough? They almost certainly are — but the <a href="/shot-guide/">shot guides</a> say exactly what we need for a property, a vehicle or a product, and where the camera should stand for anything you are missing.</p>
+    <p class="mono" style="color:var(--faint);font-size:.8rem;margin:22px auto 0">{email} · {domain} · {short_domain}</p>
   </div>
 </section>
 

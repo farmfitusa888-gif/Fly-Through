@@ -924,3 +924,75 @@ def test_trim_leaves_a_hype_beat_with_no_freeze_alone(tmp_path):
     trimmed = trim_stalls(held, tmp_path / "held_out.mp4")
     removed = probe_duration(held) - probe_duration(trimmed)
     assert 0.35 < removed < 0.75, f"removed {removed:.2f}s of a 0.5s clone"
+
+
+# ------------------------------------------------------------------- the store
+
+
+def _catalog():
+    root = Path(__file__).resolve().parents[2]
+    for extra in (root / "model", root / "pipeline"):
+        if str(extra) not in sys.path:
+            sys.path.insert(0, str(extra))
+    import catalog
+    return catalog
+
+
+def test_no_sku_sells_below_cost():
+    for s in _catalog().CATALOG:
+        assert s.margin()["gp"] > 0, f"{s.id} loses money"
+
+
+def test_every_sku_has_a_payment_link_slot():
+    """config.payments.links is what the Buy button reads. A SKU missing from it
+    can never be bought; a stale id in it is a link nobody will ever click."""
+    root = Path(__file__).resolve().parents[2]
+    cfg = json.loads((root / "site" / "config.json").read_text())
+    links = cfg["payments"]["links"]
+    ids = {s.id for s in _catalog().CATALOG}
+    assert set(links) == ids, (
+        f"missing slots: {sorted(ids - set(links))}; "
+        f"stale slots: {sorted(set(links) - ids)}")
+
+
+def test_every_sku_declares_intake_for_its_vertical():
+    """No intake questions means a paid order with nothing to work from."""
+    cat = _catalog()
+    for s in cat.CATALOG:
+        assert cat.INTAKE.get(s.vertical), s.id
+        assert len(cat.INTAKE[s.vertical]) >= 3, s.vertical
+
+
+def test_real_estate_skus_cannot_opt_out_of_disclosure():
+    """A rooms SKU sold with placement 'none' would be an unlawful delivery.
+    compliance refuses it in code; this pins that the catalogue agrees."""
+    from flythrough.compliance import ALLOWED_PLACEMENT, check_placement
+    cat = _catalog()
+    assert "none" not in ALLOWED_PLACEMENT["rooms"]
+    for s in cat.CATALOG:
+        if s.vertical == "rooms":
+            with pytest.raises(Exception):
+                check_placement("rooms", "none")
+
+
+def test_buy_button_never_renders_an_empty_href():
+    """An unconfigured SKU must fall back to the email path, never a dead link."""
+    root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(root / "site"))
+    import importlib
+    bl = importlib.import_module("build_landing")
+    html = bl.buy("a-sku-with-no-link-configured")
+    assert 'href=""' not in html
+    assert "mailto:" in html
+
+
+def test_site_has_no_dead_internal_links():
+    """The link checker that build_all runs, pinned as a test. A dead link on
+    the page that just took someone's money is the expensive kind."""
+    root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(root / "site"))
+    import importlib
+    ba = importlib.import_module("build_all")
+    if not (ba.DIST / "index.html").exists():
+        pytest.skip("dist/ not built; run python3 site/build_all.py")
+    assert ba.check_links() == []

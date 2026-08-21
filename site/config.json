@@ -5,5 +5,25 @@
   "tagline": "Drone-style video from photos you already have",
   "originals_path": "/o",
   "contact_email": "hello@iflythroughit.com",
-  "_note": "domain is canonical and appears in captions and on-page text. short_domain is a redirect used ONLY for QR codes and texted links: it encodes at QR version 3 (29 modules) against version 5 (37) for the canonical URL, so the printed square is ~22% denser and scans from further. Both point at the same site. Changing either here updates every disclosure URL, QR and caption on the next build."
+  "_note": "domain is canonical and appears in captions and on-page text. short_domain is a redirect used ONLY for QR codes and texted links: it encodes at QR version 3 (29 modules) against version 5 (37) for the canonical URL, so the printed square is ~22% denser and scans from further. Both point at the same site. Changing either here updates every disclosure URL, QR and caption on the next build.",
+  "payments": {
+    "provider": "stripe",
+    "_note": "Paste each SKU's Stripe Payment Link URL here and rebuild. A SKU with an empty link renders its email path instead of a dead Buy button -- see business/09-store.md for how to create them. Nothing here is secret: Payment Links are public URLs and carry no key, which is the whole reason a static site can take money.",
+    "success_path": "/start",
+    "links": {
+      "re-single-listing": "",
+      "re-listing-pro": "",
+      "re-signature": "",
+      "re-retainer": "",
+      "veh-walkaround": "",
+      "veh-ad-mainstream": "",
+      "veh-ad-premium": "",
+      "veh-launch": "",
+      "lot-25": "",
+      "lot-50": "",
+      "lot-100": "",
+      "prod-single": "",
+      "prod-three": ""
+    }
+  }
 }

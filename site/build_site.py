@@ -7,9 +7,13 @@
 Produces site/dist/, a static site ready for Netlify, Cloudflare Pages, GitHub
 Pages or any bucket:
 
-    dist/index.html              what the service is, for anyone who lands on the root
+    dist/o/index.html            the originals hub: what these pages are for
     dist/o/<slug>/index.html     the unaltered-originals page for one job
     dist/o/<slug>/originals/     the client's own photographs, untouched
+
+dist/index.html belongs to build_landing.py and is NOT written here. Both
+builders used to write it and this one ran second, so a full build silently
+replaced the sales page with the disclosure explainer.
 
 WHY THIS EXISTS
 
@@ -64,7 +68,7 @@ color:var(--muted);font-size:.87rem}
 """
 
 
-def root_index(cfg: dict, jobs: list[str]) -> str:
+def originals_index(cfg: dict, jobs: list[str]) -> str:
     return f"""<title>{cfg['brand']}</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>{ROOT_CSS}</style>
@@ -92,7 +96,7 @@ def root_index(cfg: dict, jobs: list[str]) -> str:
     photographs on these pages are the files we received.</p>
   </div>
 
-  <footer>{cfg['domain']} &middot; <a href="mailto:{cfg['contact_email']}">{cfg['contact_email']}</a></footer>
+  <footer><a href="/">{cfg['domain']}</a> &middot; <a href="mailto:{cfg['contact_email']}">{cfg['contact_email']}</a></footer>
 </div>
 """
 
@@ -142,10 +146,12 @@ def main() -> int:
         built.append(slug)
         print(f"  built /o/{slug}/")
 
-    (DIST / "index.html").write_text(root_index(CONFIG, built))
+    # NOT dist/index.html -- that is the landing page, built by build_landing.py.
+    (DIST / "o").mkdir(parents=True, exist_ok=True)
+    (DIST / "o" / "index.html").write_text(originals_index(CONFIG, built))
     (DIST / "_headers").write_text(
         "/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: no-referrer\n")
-    print(f"  built /  (root)")
+    print(f"  built /o/  (originals hub)")
     print()
     print(f"  domain : {CONFIG['domain']}   (change it in site/config.json only)")
     print(f"  deploy : upload site/dist/ to Netlify, Cloudflare Pages or any bucket")
