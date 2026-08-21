@@ -1,8 +1,9 @@
 {
   "domain": "iflythroughit.com",
+  "short_domain": "iflytoit.com",
   "brand": "FlyThrough",
-  "tagline": "Drone-style property video from photos you already have",
+  "tagline": "Drone-style video from photos you already have",
   "originals_path": "/o",
   "contact_email": "hello@iflythroughit.com",
-  "_note": "Domain lives here, never in code. Changing it here updates every disclosure URL, QR code and caption on the next build."
+  "_note": "domain is canonical and appears in captions and on-page text. short_domain is a redirect used ONLY for QR codes and texted links: it encodes at QR version 3 (29 modules) against version 5 (37) for the canonical URL, so the printed square is ~22% denser and scans from further. Both point at the same site. Changing either here updates every disclosure URL, QR and caption on the next build."
 }

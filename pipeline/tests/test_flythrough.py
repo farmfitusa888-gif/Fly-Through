@@ -542,3 +542,58 @@ def test_viewpoint_ports_to_vehicles_unchanged():
     risks = assess([("driver_side", "left", "passenger_side", "right")])
     assert risks and risks[0].severity == "block"
     assert assess([("dash", "inside", "front_seats", "inside")]) == []
+
+
+# --- product taxonomy (product-motion ads) ----------------------------------
+
+PRODUCT_LABELS = {
+    "01_hero-three-quarter": "hero", "02_front": "front", "03_profile": "side",
+    "04_back": "back", "05_flatlay": "top", "06_stitching-closeup": "detail",
+    "07_leather-swatch": "material", "08_unzipped": "open", "09_lining": "interior",
+    "10_in-hand": "scale", "11_lifestyle-styled": "in_use", "12_unboxing": "packaging",
+    "13_size-chart": "size_chart", "14_care-label": "label", "junk": "other",
+}
+
+
+@pytest.mark.parametrize("label,expected", sorted(PRODUCT_LABELS.items()))
+def test_product_resolution(label, expected):
+    from flythrough.products import resolve as presolve
+    assert presolve(label).key == expected
+
+
+def test_every_underscored_key_is_reachable():
+    """A canonical key with an underscore can never match a token, so each one
+    needs a joined-form alias. Without this, size_chart silently became 'other'."""
+    from flythrough import products, vehicles
+    for mod in (products, vehicles):
+        for key in mod.TOUR_ORDER:
+            if "_" not in key:
+                continue
+            joined = key.replace("_", "")
+            reachable = joined in mod.ALIASES or any(
+                v == key for v in mod.ALIASES.values())
+            assert reachable, f"{mod.__name__}.{key} is unreachable from any label"
+
+
+@pytest.mark.parametrize("mod_name", ["rooms", "vehicles", "products"])
+def test_all_taxonomies_share_one_contract(mod_name):
+    """Three verticals, one interface. The planner never knows which it has."""
+    import importlib
+    mod = importlib.import_module(f"flythrough.{mod_name}")
+    for name in ("TOUR_ORDER", "ALIASES", "NON_HERO", "INTERIOR", "UNKNOWN", "resolve"):
+        assert hasattr(mod, name), f"{mod_name}.{name} missing"
+    r = mod.resolve("!!!nonsense!!!")
+    assert r is not None and r.key == mod.UNKNOWN
+    for attr in ("key", "rank", "interior", "is_known", "hero_eligible"):
+        assert hasattr(r, attr)
+
+
+def test_no_taxonomy_contains_a_person():
+    """Product ads must never generate a human -- FTC bans AI testimonials
+    outright, and generated people in listing media invite fair-housing risk."""
+    from flythrough import products, vehicles, rooms
+    banned = {"person", "model", "presenter", "spokesperson", "creator",
+              "testimonial", "customer", "influencer"}
+    for mod in (products, vehicles, rooms):
+        keys = set(mod.TOUR_ORDER) | set(mod.ALIASES)
+        assert not (keys & banned), f"{mod.__name__} references a person"

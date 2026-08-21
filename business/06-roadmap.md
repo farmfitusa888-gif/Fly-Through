@@ -52,12 +52,20 @@ start-to-finish by someone who is not the founder.**
 
 Ranked by expected value, and deliberately **not started early**:
 
-1. **Self-serve product.** Upload, pay, receive. Justified only once the manual
+1. **Product Motion Ads** — the second productized offer, specified in
+   `business/08-product-motion-ads.md`. Taxonomy built and tested
+   (`pipeline/flythrough/products.py`). Deliberately NOT "AI UGC ads": the FTC
+   Reviews & Testimonials Rule bans AI-generated testimonials outright at up to
+   $53,088 per violation, regardless of disclosure. Selling motion around a real
+   product, with no person in frame, has none of that exposure and reuses the
+   entire pipeline.
+
+2. **Self-serve product.** Upload, pay, receive. Justified only once the manual
    workflow is provably stable — building it earlier means automating a process
    still being discovered. This is the "productize later" half of the strategy.
-2. **White-label for brokerages.** Their branding, our pipeline, per-seat pricing.
+3. **White-label for brokerages.** Their branding, our pipeline, per-seat pricing.
    The natural evolution of the photographer partnership.
-3. **Auto dealers — the strongest adjacent vertical, ahead of everything else.**
+4. **Auto dealers — the strongest adjacent vertical, ahead of everything else.**
    Taxonomy already built (`pipeline/flythrough/vehicles.py`, tested). Dealers
    beat listing agents on every axis that matters:
    - They already photograph every unit systematically, 20–40 frames to a house
@@ -75,10 +83,10 @@ Ranked by expected value, and deliberately **not started early**:
    NAR Article 12 and California AB 723 — real-estate law. Do not reuse it here
    without a lawyer in the operating state.
 
-4. **Then**: land and acreage (real drones are hardest there, so our relative
+5. **Then**: land and acreage (real drones are hardest there, so our relative
    advantage is largest), venues and short-term rentals, then products and
    e-commerce — biggest market, but lowest ticket and most competition, so last.
-5. **True 3D**, via Gaussian splatting from a walkaround video. A different and
+6. **True 3D**, via Gaussian splatting from a walkaround video. A different and
    much stronger product — arbitrary camera paths, an interactive viewer, no
    drift at all. Revisit only when GPU cost and customer capture effort both
    justify it. **Do not start here**; the current mechanism reaches revenue
