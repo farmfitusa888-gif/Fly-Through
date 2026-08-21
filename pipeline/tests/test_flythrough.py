@@ -243,3 +243,77 @@ def test_slice_produces_named_tiles_the_planner_can_read(tmp_path):
 
     plan = build_plan(tmp_path / "tiles", listing="Sheet House")
     assert [p.room_key for p in plan.photos] == ["living", "kitchen", "primary_bed", "patio"]
+
+
+# --- inventory gate ---------------------------------------------------------
+
+SHEET_RECORD = {
+    "id": "sheet1",
+    "prompt": ("A 2x2 grid contact sheet of four real estate photographs of the same "
+               "modern farmhouse, white board-and-batten walls, black window frames. "
+               "TOP LEFT: the living room, shiplap walls. TOP RIGHT: the kitchen, "
+               "shaker cabinets. BOTTOM LEFT: the primary bedroom, oak bed. "
+               "BOTTOM RIGHT: the rear covered patio, cedar ceiling."),
+    "metadata": {"width": 5504, "height": 3072},
+}
+EXTERIOR_RECORD = {
+    "id": "ext1",
+    "prompt": "Real estate listing photograph of the front elevation of a modern farmhouse.",
+    "metadata": {"width": 2752, "height": 1536},
+}
+
+
+def test_sheet_reports_exactly_its_cells():
+    from flythrough.inventory import classify
+    a = classify(SHEET_RECORD)
+    assert a.is_sheet
+    assert set(a.sheet_rooms) == {"living", "kitchen", "primary_bed", "patio"}
+
+
+def test_sheet_never_claims_a_room_it_lacks():
+    """A false positive suppresses a needed room and ships a tour with a hole.
+
+    'rear covered patio' contains 'rear', which resolves to exterior on its own.
+    The sheet must NOT therefore claim to cover the exterior.
+    """
+    from flythrough.inventory import classify
+    assert "exterior" not in classify(SHEET_RECORD).sheet_rooms
+
+
+def test_gate_blocks_the_duplicate_that_actually_happened():
+    """Replays the real 120-credit waste: 3 of 4 rooms were already in a sheet."""
+    from flythrough.inventory import check
+    v = check(["living", "kitchen", "patio", "aerial"],
+              provider_records=[SHEET_RECORD, EXTERIOR_RECORD])
+    assert v.missing == ["aerial"]
+    assert set(v.have) == {"living", "kitchen", "patio"}
+    assert v.credits_saved == 120
+    assert not v.is_clean
+
+
+def test_gate_passes_rooms_nothing_covers():
+    from flythrough.inventory import check
+    v = check(["dining", "primary_bath"],
+              provider_records=[SHEET_RECORD, EXTERIOR_RECORD])
+    assert v.missing == ["dining", "primary_bath"]
+    assert v.is_clean and v.credits_saved == 0
+
+
+def test_local_registry_round_trips_and_dedupes(tmp_path):
+    from flythrough.inventory import Asset, LocalRegistry
+    reg = LocalRegistry(tmp_path / "registry.json")
+    reg.add(Asset(asset_id="a1", url="u", room="kitchen"))
+    reg.add(Asset(asset_id="a1", url="u", room="kitchen"))   # same id, ignored
+    reg.add(Asset(asset_id="a2", url="u", room="living"))
+    assert len(reg.assets) == 2
+    assert LocalRegistry(tmp_path / "registry.json").rooms == {"kitchen", "living"}
+
+
+def test_registry_and_provider_layers_combine(tmp_path):
+    from flythrough.inventory import Asset, LocalRegistry, check
+    reg = LocalRegistry(tmp_path / "r.json")
+    reg.add(Asset(asset_id="local1", url="u", room="aerial"))
+    v = check(["living", "aerial", "dining"],
+              registry=reg, provider_records=[SHEET_RECORD])
+    assert v.missing == ["dining"]
+    assert v.have["aerial"] == "local1" and v.have["living"] == "sheet1"

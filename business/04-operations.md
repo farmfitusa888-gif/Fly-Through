@@ -8,6 +8,7 @@ operator minutes, and a process only a founder can execute cannot be delegated.
 
 | # | Step | Time | Automated? |
 |---|---|---|---|
+| 0 | **Inventory check — what do we already hold?** | 1m | `inventory.check` |
 | 1 | Intake: receive photos + address | 2m | Form |
 | 2 | Photo audit: count, anchors, labels | 3m | `flythrough plan` warns |
 | 3 | Build and review the shot plan | 4m | `flythrough plan` |
@@ -18,6 +19,22 @@ operator minutes, and a process only a founder can execute cannot be delegated.
 | 8 | Assemble master, vertical, thumbnail | 2m | `flythrough assemble` |
 | 9 | Generate disclosure pack, publish originals page | 2m | `compliance.build_pack` |
 | 10 | Deliver with captions + the referral ask | 4m | template |
+
+### Step 0 is not optional
+
+`inventory.check()` runs before any paid generation and returns only the rooms
+absent from both the local registry and the provider's own history. A room already
+covered by a contact sheet counts as held — slicing a sheet is free, re-rendering
+what it contains is not.
+
+This gate exists because of a measured failure during development: a 4K sheet
+containing living / kitchen / primary bedroom / patio was generated, then three of
+those four rooms were ordered again as separate stills. **120 credits burned.**
+Attention does not scale to thirty jobs a month; a gate does.
+
+The classifier is deliberately conservative. A false negative costs one duplicate
+render. A false positive suppresses a room that is genuinely needed and ships a
+tour with a hole in it — so when in doubt it reports the room as missing.
 
 **Step 7 is the entire operating cost of this business.** Every automation dollar
 belongs there and nowhere else. Steps 2, 3, 4, 8 and 9 are already code.
