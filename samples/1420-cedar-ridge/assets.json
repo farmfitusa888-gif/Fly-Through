@@ -5,19 +5,104 @@
   "model": "wan2-7 image2video @1080p, startFrame + endFrame anchored",
   "style": "goldenhour",
   "stills": [
-    {"room": "exterior", "id": "L2uF4FYsYwun1k0mDuSX", "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-image/V0CbPyLdg5HOHc1h6Y50/image_1787274941423_fc5e415d_1787274942042_668d08cb.png"},
-    {"room": "entry", "id": "bwsMMpM8aTK7hxfF0oce", "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-image/V0CbPyLdg5HOHc1h6Y50/image_1787275038121_872e3016_1787275038819_abe97c5d.png"},
-    {"room": "living", "id": "8oQlL7r0JvJ1N1gK6CaF", "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-image/V0CbPyLdg5HOHc1h6Y50/image_1787275500613_ce5596a5_1787275501072_16c56dd3.png"},
-    {"room": "kitchen", "id": "9moIVzwSazJ3ihoQ6qET", "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-image/V0CbPyLdg5HOHc1h6Y50/image_1787275505692_5641dfc0_1787275506491_f96f103c.png"},
-    {"room": "patio", "id": "o3iGNe1L8jYIX0HF9zIE", "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-image/V0CbPyLdg5HOHc1h6Y50/image_1787275514691_38e72198_1787275515417_3242907c.png"},
-    {"room": "aerial", "id": "awTORbm7v7nLXvk3Tu5c", "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-image/V0CbPyLdg5HOHc1h6Y50/image_1787275518796_8743cb7f_1787275520201_78e1ed4f.png"}
+    {
+      "room": "exterior",
+      "id": "L2uF4FYsYwun1k0mDuSX",
+      "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-image/V0CbPyLdg5HOHc1h6Y50/image_1787274941423_fc5e415d_1787274942042_668d08cb.png"
+    },
+    {
+      "room": "entry",
+      "id": "bwsMMpM8aTK7hxfF0oce",
+      "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-image/V0CbPyLdg5HOHc1h6Y50/image_1787275038121_872e3016_1787275038819_abe97c5d.png"
+    },
+    {
+      "room": "living",
+      "id": "8oQlL7r0JvJ1N1gK6CaF",
+      "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-image/V0CbPyLdg5HOHc1h6Y50/image_1787275500613_ce5596a5_1787275501072_16c56dd3.png"
+    },
+    {
+      "room": "kitchen",
+      "id": "9moIVzwSazJ3ihoQ6qET",
+      "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-image/V0CbPyLdg5HOHc1h6Y50/image_1787275505692_5641dfc0_1787275506491_f96f103c.png"
+    },
+    {
+      "room": "patio",
+      "id": "o3iGNe1L8jYIX0HF9zIE",
+      "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-image/V0CbPyLdg5HOHc1h6Y50/image_1787275514691_38e72198_1787275515417_3242907c.png"
+    },
+    {
+      "room": "aerial",
+      "id": "J209diMJ4FffkXinzOQ8",
+      "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-image/V0CbPyLdg5HOHc1h6Y50/image_1787276674291_447bba24_1787276675230_30a604bf.png",
+      "note": "Framed over the REAR to match the patio anchor. Replaces a front-framed aerial that made the closing shot fly to what looked like a different house."
+    }
   ],
   "shots": [
-    {"index": 0, "from": "exterior", "to": "entry",   "move": "threshold",     "seconds": 5, "id": "vrtdA69Bt6diz6Dkr3Ev", "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/88184667-metadata_user_a09b06f0ad471a70_1787275175369_aa0dc8ac.mp4"},
-    {"index": 1, "from": "entry",    "to": "living",  "move": "glide_through", "seconds": 5, "id": "5uQHW5qTiq5iIpSsGOZb", "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/62485586-metadata_user_878e919990cecfac_1787275829623_b77289be.mp4"},
-    {"index": 2, "from": "living",   "to": "kitchen", "move": "glide_through", "seconds": 5, "id": "H246g8YJRNdmH5j4Bybz", "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/51773234-metadata_user_342497fbd6f020bc_1787275858364_110e4951.mp4"},
-    {"index": 3, "from": "kitchen",  "to": "patio",   "move": "exit_to_light", "seconds": 5, "id": "vs0Nr4mh4xhrXFMHKncn", "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/83734961-metadata_user_62a2ea82eb4c0c8b_1787275841184_d3be2260.mp4"},
-    {"index": 4, "from": "patio",    "to": "aerial",  "move": "ground_to_air", "seconds": 6, "id": "IgqEEYPG9AXEymyofuQ6", "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/10245958-metadata_user_05534c414d05125f_1787275856828_1fa4a69e.mp4"}
+    {
+      "index": 0,
+      "from": "exterior",
+      "to": "entry",
+      "move": "threshold",
+      "seconds": 5,
+      "id": "vrtdA69Bt6diz6Dkr3Ev",
+      "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/88184667-metadata_user_a09b06f0ad471a70_1787275175369_aa0dc8ac.mp4"
+    },
+    {
+      "index": 1,
+      "from": "entry",
+      "to": "living",
+      "move": "glide_through",
+      "seconds": 5,
+      "id": "5uQHW5qTiq5iIpSsGOZb",
+      "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/62485586-metadata_user_878e919990cecfac_1787275829623_b77289be.mp4"
+    },
+    {
+      "index": 2,
+      "from": "living",
+      "to": "kitchen",
+      "move": "glide_through",
+      "seconds": 5,
+      "id": "H246g8YJRNdmH5j4Bybz",
+      "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/51773234-metadata_user_342497fbd6f020bc_1787275858364_110e4951.mp4"
+    },
+    {
+      "index": 3,
+      "from": "kitchen",
+      "to": "patio",
+      "move": "exit_to_light",
+      "seconds": 5,
+      "id": "vs0Nr4mh4xhrXFMHKncn",
+      "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/83734961-metadata_user_62a2ea82eb4c0c8b_1787275841184_d3be2260.mp4"
+    },
+    {
+      "index": 4,
+      "from": "patio",
+      "to": "aerial",
+      "move": "ground_to_air",
+      "seconds": 6,
+      "id": "3KnwjYob45VZc0AioLPW",
+      "url": "https://cdn.openart.ai/openart-ai/production/2026-08/create-video/V0CbPyLdg5HOHc1h6Y50/25749637-metadata_user_19a523e0028eb5b8_1787276759554_5a5314a8.mp4",
+      "note": "Re-rendered against a rear-framed aerial after viewpoint discontinuity."
+    }
   ],
-  "spend_credits": {"stills": 320, "sheet": 80, "video": 910, "total": 1310, "wasted_duplicates": 120}
+  "spend_credits": {
+    "stills": 360,
+    "sheet": 80,
+    "video": 1120,
+    "total": 1560,
+    "wasted_duplicates": 120,
+    "wasted_bad_pairing": 210
+  },
+  "superseded": [
+    {
+      "kind": "still",
+      "id": "awTORbm7v7nLXvk3Tu5c",
+      "reason": "aerial framed over the FRONT; incompatible with the patio anchor"
+    },
+    {
+      "kind": "shot",
+      "id": "IgqEEYPG9AXEymyofuQ6",
+      "reason": "closing shot flew to what looked like a second house"
+    }
+  ]
 }

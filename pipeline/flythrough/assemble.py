@@ -89,33 +89,47 @@ def concat(
     for c in clips:
         args += ["-i", str(c)]
 
-    # Normalise every input first: xfade requires identical geometry, fps and
-    # pixel format, and AI providers do not guarantee any of the three.
-    chains: list[str] = []
-    for i in range(len(clips)):
-        chains.append(
-            f"[{i}:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{height},fps={fps},format=yuv420p,setpts=PTS-STARTPTS[v{i}]"
-        )
+    # Normalise every input first: xfade and concat both require identical
+    # geometry, fps and pixel format, and AI providers guarantee none of the three.
+    chains: list[str] = [
+        f"[{i}:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
+        f"crop={width}:{height},fps={fps},format=yuv420p,setpts=PTS-STARTPTS[v{i}]"
+        for i in range(len(clips))
+    ]
 
-    # Chain the crossfades. Each xfade shortens the timeline by `crossfade`
-    # seconds, so every offset must be computed against the running total, not
-    # the raw clip start -- getting this wrong is the classic xfade bug where
-    # later transitions land in the wrong place.
-    prev = "v0"
-    running = durations[0]
-    for i in range(1, len(clips)):
-        fade = min(crossfade, durations[i] / 2, running / 2)
-        offset = max(running - fade, 0.0)
-        label = f"x{i}"
-        chains.append(
-            f"[{prev}][v{i}]xfade=transition=fade:duration={fade:.3f}:"
-            f"offset={offset:.3f}[{label}]"
-        )
-        running = running + durations[i] - fade
-        prev = label
+    frame = 1.0 / fps
+    if crossfade < frame:
+        # HARD CUT. This is the right seam for anchored shots: shot N ends on the
+        # same photograph shot N+1 begins on, so the boundary frames already
+        # match and there is nothing to dissolve -- a crossfade would only soften
+        # a picture that was already continuous.
+        #
+        # It is also a correctness fix. xfade with a sub-frame duration formats to
+        # 0.000 and silently drops a clip, so anything below one frame MUST take
+        # this path rather than a degenerate dissolve.
+        inputs = "".join(f"[v{i}]" for i in range(len(clips)))
+        chains.append(f"{inputs}concat=n={len(clips)}:v=1:a=0[out]")
+        final = "out"
+    else:
+        # Chain the crossfades. Each xfade shortens the timeline by `crossfade`
+        # seconds, so every offset is computed against the running total rather
+        # than the raw clip start -- the classic xfade bug is using the latter and
+        # landing every later transition in the wrong place.
+        prev = "v0"
+        running = durations[0]
+        for i in range(1, len(clips)):
+            fade = min(crossfade, durations[i] / 2, running / 2)
+            offset = max(running - fade, 0.0)
+            label = f"x{i}"
+            chains.append(
+                f"[{prev}][v{i}]xfade=transition=fade:duration={fade:.3f}:"
+                f"offset={offset:.3f}[{label}]"
+            )
+            running = running + durations[i] - fade
+            prev = label
+        final = prev
 
-    args += ["-filter_complex", ";".join(chains), "-map", f"[{prev}]",
+    args += ["-filter_complex", ";".join(chains), "-map", f"[{final}]",
              "-c:v", "libx264", "-crf", "18", "-preset", "medium",
              "-pix_fmt", "yuv420p", "-an", str(out)]
     _run(args)
@@ -164,6 +178,7 @@ def deliver(
     *,
     slug: str,
     crossfade: float = 0.4,
+    fps: int = 24,
     music: str | Path | None = None,
     make_vertical: bool = True,
     make_thumb: bool = True,
@@ -172,7 +187,8 @@ def deliver(
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    master = concat(clips, outdir / f"{slug}_master_16x9.mp4", crossfade=crossfade)
+    master = concat(clips, outdir / f"{slug}_master_16x9.mp4",
+                    crossfade=crossfade, fps=fps)
     if music:
         master = add_music(master, music, outdir / f"{slug}_master_16x9_music.mp4")
 

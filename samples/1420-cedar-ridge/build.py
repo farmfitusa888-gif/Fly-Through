@@ -36,18 +36,39 @@ from flythrough.compliance import build_pack                          # noqa: E4
 ORIGINALS_URL = "https://flythrough.co/o/1420-cedar-ridge"
 
 
+class FetchBlocked(RuntimeError):
+    """Raised with an actionable message rather than a raw traceback."""
+
+
 def fetch(url: str, dest: Path) -> Path:
     if dest.exists() and dest.stat().st_size > 0:
         print(f"  cached  {dest.name}")
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
     print(f"  get     {dest.name}")
-    with urllib.request.urlopen(url) as r, open(dest, "wb") as f:
-        shutil.copyfileobj(r, f)
+    try:
+        with urllib.request.urlopen(url, timeout=60) as r, open(dest, "wb") as f:
+            shutil.copyfileobj(r, f)
+    except Exception as exc:
+        dest.unlink(missing_ok=True)
+        raise FetchBlocked(
+            f"could not fetch {dest.name}\n"
+            f"    {type(exc).__name__}: {exc}\n\n"
+            "  This machine cannot reach cdn.openart.ai. That is usually a\n"
+            "  corporate proxy or egress policy, not a problem with this script.\n"
+            "  Run it from a machine with ordinary internet access, or download\n"
+            "  the assets manually from your OpenArt history and place them as:\n"
+            "    samples/1420-cedar-ridge/delivery/originals/NN_<room>.png\n"
+            "    samples/1420-cedar-ridge/work/shot_NN_<move>.mp4\n"
+            "  Already-present files are reused, so a partial download resumes."
+        ) from None
     return dest
 
 
 def main() -> int:
+    if shutil.which("ffmpeg") is None:
+        print("ffmpeg is not on PATH. Install it and re-run.", file=sys.stderr)
+        return 2
     spec = json.loads((HERE / "assets.json").read_text())
     work = HERE / "work"
     out = HERE / "delivery"
@@ -73,8 +94,15 @@ def main() -> int:
     )
 
     # The disclosure card leads the master so it survives any re-post.
-    print("Assembling master (disclosure card + 5 shots)")
-    d = deliver([pack.card, *clips], out, slug=spec["slug"], crossfade=0.4)
+    # Hard cut between shots: every shot ends on the photograph the next one
+    # begins on, so the boundary frames already match and a dissolve would only
+    # soften a picture that was already continuous. 30fps matches the source
+    # renders exactly, avoiding the judder a 30->24 conversion introduces.
+    print("Assembling master (disclosure card + 5 shots, seamless hard cuts)")
+    card_join = concat([pack.card, clips[0]], work / "intro.mp4",
+                       crossfade=0.5, fps=30)          # card DOES need a dissolve
+    d = deliver([card_join, *clips[1:]], out, slug=spec["slug"],
+                crossfade=0.0, fps=30)
 
     print()
     print(f"  master   {d.master.name}   {d.duration:.1f}s")
@@ -89,4 +117,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except FetchBlocked as exc:
+        print(f"\n  BLOCKED: {exc}\n", file=sys.stderr)
+        raise SystemExit(1)

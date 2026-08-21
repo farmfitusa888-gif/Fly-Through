@@ -367,3 +367,65 @@ def test_plan_surfaces_viewpoint_risk_before_spending(photos):
     plan = build_plan(photos, listing="Test House")
     joined = " ".join(plan.warnings)
     assert "different house" in joined, plan.warnings
+
+
+def test_subframe_crossfade_uses_hard_cut_and_keeps_full_length(tmp_path):
+    """Regression: xfade with a sub-frame duration formats to 0.000 and silently
+    DROPS a clip. Anything under one frame must take the concat path instead."""
+    clips = []
+    for i, c in enumerate(("red", "green", "blue")):
+        p = tmp_path / f"c{i}.mp4"
+        subprocess.run(
+            ["ffmpeg", "-f", "lavfi", "-i", f"color=c={c}:s=1926x1076:d=3:r=30",
+             "-c:v", "libx264", "-pix_fmt", "yuv420p", str(p), "-y", "-loglevel", "error"],
+            check=True)
+        clips.append(p)
+
+    for xf in (0.0, 0.001, 0.02):
+        out = concat(clips, tmp_path / f"hard_{xf}.mp4", crossfade=xf, fps=30)
+        assert probe_duration(out) == pytest.approx(9.0, abs=0.1), (
+            f"crossfade={xf} lost footage -- the sub-frame xfade bug is back")
+
+    # Above one frame the dissolve still applies and shortens the timeline.
+    faded = concat(clips, tmp_path / "faded.mp4", crossfade=0.5, fps=30)
+    assert probe_duration(faded) == pytest.approx(9.0 - 2 * 0.5, abs=0.1)
+
+
+def test_hard_cut_seam_is_frame_identical(tmp_path):
+    """Two clips sharing a boundary frame must join with no visible change.
+
+    This is the property anchoring buys: shot N ends on the photo shot N+1
+    starts on, so a plain cut is already seamless.
+    """
+    shared = tmp_path / "shared.mp4"
+    subprocess.run(
+        ["ffmpeg", "-f", "lavfi", "-i", "color=c=0xb5651d:s=1926x1076:d=2:r=30",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(shared), "-y", "-loglevel", "error"],
+        check=True)
+
+    def join(first, second, dest):
+        subprocess.run(
+            ["ffmpeg", "-i", str(first), "-i", str(second), "-filter_complex",
+             "[0:v][1:v]concat=n=2:v=1[v]", "-map", "[v]", "-c:v", "libx264",
+             "-pix_fmt", "yuv420p", str(dest), "-y", "-loglevel", "error"], check=True)
+        return dest
+
+    body = tmp_path / "body.mp4"
+    subprocess.run(
+        ["ffmpeg", "-f", "lavfi", "-i", "color=c=0x2e6f4e:s=1926x1076:d=3:r=30",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(body), "-y", "-loglevel", "error"],
+        check=True)
+
+    a = join(body, shared, tmp_path / "a.mp4")      # ends on shared
+    b = join(shared, body, tmp_path / "b.mp4")      # starts on shared
+    master = concat([a, b], tmp_path / "m.mp4", crossfade=0.0, fps=30)
+    assert probe_duration(master) == pytest.approx(10.0, abs=0.15)
+
+    # Sample either side of the seam at t=5.0 and compare pixel content.
+    frames = []
+    for t in ("4.95", "5.05"):
+        f = tmp_path / f"f{t}.png"
+        subprocess.run(["ffmpeg", "-ss", t, "-i", str(master), "-frames:v", "1",
+                        str(f), "-y", "-loglevel", "error"], check=True)
+        frames.append(f.read_bytes())
+    assert frames[0] == frames[1], "seam is visible: frames differ across the cut"
