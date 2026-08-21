@@ -84,6 +84,23 @@ def side_of(label: str, room_key: str) -> str:
     return UNKNOWN
 
 
+def declared_side(label: str) -> str:
+    """The side an AERIAL label explicitly declares, if any.
+
+    An aerial is always ABOVE, but it is also always shot over one face of the
+    building. `side_of` collapses that to ABOVE, which is right for choosing a
+    camera move and wrong for checking continuity. This recovers the second axis
+    so a correctly-framed aerial -- "13_rear-aerial" -- can pass the check that a
+    front-framed one fails.
+    """
+    joined = "".join(c for c in label.lower() if c.isalpha())
+    best, best_len = UNKNOWN, 0
+    for tok, side in SIDE_TOKENS.items():
+        if side in (FRONT, REAR, LEFT, RIGHT) and tok in joined and len(tok) > best_len:
+            best, best_len = side, len(tok)
+    return best
+
+
 def assess(pairs: list[tuple[str, str, str, str]]) -> list[Risk]:
     """Flag transitions no single camera move can plausibly describe.
 
@@ -94,6 +111,11 @@ def assess(pairs: list[tuple[str, str, str, str]]) -> list[Risk]:
         # The failure that prompted this module: ground level on one face,
         # straight to an aerial framed over another.
         if b_side == ABOVE and a_side in (FRONT, REAR, LEFT, RIGHT):
+            # An aerial that names its own side and matches the ground shot is
+            # exactly what the client shot guide asks for. Do not warn on it --
+            # a check that fires on correct work trains people to ignore it.
+            if declared_side(b_label) == a_side:
+                continue
             risks.append(Risk(
                 index=i, from_label=a_label, to_label=b_label, severity="warn",
                 reason=(
@@ -104,8 +126,9 @@ def assess(pairs: list[tuple[str, str, str, str]]) -> list[Risk]:
                 ),
                 fix=(
                     f"Shoot or choose an aerial framed over the {a_side} of the "
-                    f"property, or place the closing rise after a {a_side}-side "
-                    "exterior shot."
+                    f"property, and name the file so it says so "
+                    f"(e.g. \"13_{a_side}-aerial.jpg\"). Alternatively place the "
+                    f"closing rise after a {a_side}-side exterior shot."
                 ),
             ))
             continue
