@@ -726,11 +726,14 @@ def test_trim_never_guts_a_short_clip(tmp_path):
     assert probe_duration(out) >= 0.55
 
 
-def test_trim_cap_scales_with_clip_length(tmp_path):
-    """A fixed cap silently blocked a needed 1.7s cut on a 5s clip. The cap must
-    be a fraction of duration, not an absolute."""
+def test_trim_has_no_arbitrary_cap(tmp_path):
+    """Two caps were tried -- a fixed 0.55s and a fraction of duration -- and both
+    silently blocked correctly-identified cuts, leaving freeze in the output.
+    There is no principled maximum: if 40% of a clip is held, 40% should go.
+    keep_min is the only legitimate guard."""
     import inspect
     from flythrough.assemble import trim_stalls
-    sig = inspect.signature(trim_stalls)
-    assert "max_trim_fraction" in sig.parameters
-    assert "max_trim" not in sig.parameters
+    params = inspect.signature(trim_stalls).parameters
+    assert "max_trim" not in params
+    assert "max_trim_fraction" not in params
+    assert "keep_min" in params

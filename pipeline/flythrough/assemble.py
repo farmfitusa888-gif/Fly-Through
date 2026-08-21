@@ -73,7 +73,6 @@ def trim_stalls(
     *,
     threshold: float = 0.08,
     min_trim: float = 0.0,
-    max_trim_fraction: float = 0.32,
     keep_min: float = 0.60,
     fps: int = 30,
 ) -> Path:
@@ -149,14 +148,15 @@ def trim_stalls(
     # so a small floor is applied even when the gate does not fire. Without it a
     # clip whose first frames happen to twitch keeps its freeze and the seam still
     # reads as a held image.
-    # The cap must scale with clip length. Measured on a 4.97s anchored clip,
-    # motion died 1.33s before the end -- 27% of the clip was a frozen hold on the
-    # anchor frame. A fixed 0.55s cap silently blocked that cut, which is why the
-    # seams still read as held images after the first fix.
-    cap = int(max_trim_fraction * dur * fps)
+    # NO CAP on how much frozen material may be removed. A cap was tried twice --
+    # first a fixed 0.55s, then a fraction of duration -- and both silently
+    # blocked correctly-identified cuts, leaving freeze in the output. There is no
+    # principled maximum: if 40% of a clip is a held frame, 40% should go. The
+    # only real constraint is that something renderable must remain, and keep_min
+    # below enforces exactly that.
     floor = int(min_trim * fps)
-    head = min(max(first, floor), cap)
-    tail = min(max(len(prof) - 1 - last, floor), cap)
+    head = max(first, floor)
+    tail = max(len(prof) - 1 - last, floor)
 
     # Never trim a clip below something renderable.
     if (len(prof) - head - tail) / fps < keep_min:
