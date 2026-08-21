@@ -94,6 +94,44 @@ SIDE: dict[str, str] = {
     "undercarriage": "above",
 }
 
+# Camera-move vocabulary for this vertical, passed to moves.build_prompt so the
+# prompt speaks about a vehicle rather than a room.
+PHRASES: dict[str, str] = {
+    "hero": "the front three-quarter view of the vehicle",
+    "front": "the front of the vehicle",
+    "driver_side": "the driver side of the vehicle",
+    "passenger_side": "the passenger side of the vehicle",
+    "rear": "the rear of the vehicle",
+    "wheels": "the wheel", "engine": "the engine bay",
+    "door_open": "the open driver door",
+    "dash": "the dashboard and front cabin",
+    "front_seats": "the front seats", "rear_seats": "the rear seats",
+    "infotainment": "the centre screen", "cargo": "the cargo area",
+    "odometer": "the instrument cluster", "vin": "the VIN plate",
+    "undercarriage": "the underside", "other": "the vehicle",
+}
+
+# One continuous circuit around the object -- never reverse mid-orbit.
+ALTERNATE_ORBIT = False
+
+SUBJECT = "the vehicle"
+SUBJECT_NOUN = "vehicle"
+PRESERVE = "body shape, panel gaps, wheels, badges, trim and paint colour"
+
+# Vertical-specific suppressions. Note what is ABSENT: the real-estate bank
+# suppresses "cars appearing / disappearing", which would delete the subject.
+EXTERIOR_NEGATIVE: tuple[str, ...] = (
+    "second vehicle", "duplicate car", "changing wheels", "changing badges",
+    "extra doors", "wrong number of doors", "morphing body panels",
+    "changing paint colour", "warped reflections", "melting headlights",
+    "license plate text", "changing sky", "trees morphing",
+)
+INTERIOR_NEGATIVE: tuple[str, ...] = (
+    "changing upholstery colour", "extra seats", "morphing dashboard",
+    "changing screen content", "warped steering wheel", "melting trim",
+    "gauge text changing", "extra pedals",
+)
+
 UNKNOWN = "other"
 
 

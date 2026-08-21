@@ -24,9 +24,7 @@ from .rooms import Room
 BASE_NEGATIVE: tuple[str, ...] = (
     "people", "human figures", "faces", "hands",
     "text", "watermark", "logo", "caption", "subtitles",
-    "morphing walls", "melting furniture", "warping windows",
-    "bending door frames", "furniture changing shape",
-    "extra rooms appearing", "impossible geometry",
+    "impossible geometry", "melting shapes", "warping edges",
     "fisheye distortion", "lens flare", "vignette",
     "camera shake", "handheld jitter", "motion blur",
     "flickering", "strobing", "colour shift", "exposure pumping",
@@ -36,14 +34,16 @@ BASE_NEGATIVE: tuple[str, ...] = (
 
 # Extra suppressions for exterior work, where sky and vegetation drift most.
 EXTERIOR_NEGATIVE: tuple[str, ...] = (
-    "changing sky", "moving clouds warping", "trees morphing",
+    "morphing walls", "warping windows", "bending door frames",
+    "extra rooms appearing", "changing sky", "moving clouds warping", "trees morphing",
     "cars appearing", "cars disappearing", "roof shape changing",
     "window count changing",
 )
 
 # Extra suppressions for interiors, where the model likes to redecorate.
 INTERIOR_NEGATIVE: tuple[str, ...] = (
-    "furniture appearing", "furniture disappearing",
+    "morphing walls", "melting furniture", "furniture changing shape",
+    "extra rooms appearing", "furniture appearing", "furniture disappearing",
     "artwork changing", "reflections inventing rooms",
     "ceiling height changing", "floor pattern shifting",
 )
@@ -72,7 +72,7 @@ MOVES: dict[str, Move] = {
     "approach_push": Move(
         key="approach_push",
         label="Approach push-in",
-        camera="slow forward dolly along the driveway toward the front of the house, camera height 6 feet, level horizon",
+        camera="slow forward dolly along the approach toward the front of {subject}, camera at chest height, level horizon",
         pacing="slow, steady, constant velocity",
         seconds=5,
         exterior=True,
@@ -82,7 +82,7 @@ MOVES: dict[str, Move] = {
     "aerial_reveal": Move(
         key="aerial_reveal",
         label="Aerial reveal",
-        camera="drone rises and pushes forward over the property, gimbal tilting down to hold the house centred",
+        camera="camera rises and pushes forward over {subject}, tilting down to hold {subject} centred",
         pacing="slow ascent, unhurried",
         seconds=6,
         exterior=True,
@@ -92,7 +92,7 @@ MOVES: dict[str, Move] = {
     "orbit_left": Move(
         key="orbit_left",
         label="Orbit left",
-        camera="drone orbits the house counter-clockwise at a constant radius, gimbal locked on the building",
+        camera="camera orbits {subject} counter-clockwise at a constant radius, locked on {subject}",
         pacing="slow orbit, no acceleration",
         seconds=6,
         exterior=True,
@@ -102,7 +102,7 @@ MOVES: dict[str, Move] = {
     "orbit_right": Move(
         key="orbit_right",
         label="Orbit right",
-        camera="drone orbits the house clockwise at a constant radius, gimbal locked on the building",
+        camera="camera orbits {subject} clockwise at a constant radius, locked on {subject}",
         pacing="slow orbit, no acceleration",
         seconds=6,
         exterior=True,
@@ -111,7 +111,7 @@ MOVES: dict[str, Move] = {
     "threshold": Move(
         key="threshold",
         label="Threshold crossing",
-        camera="camera glides forward through the open doorway from outside to inside, holding centre",
+        camera="camera glides forward through the opening from outside to inside, holding centre",
         pacing="slow, continuous, no stop at the door",
         seconds=5,
         exterior=False,
@@ -121,7 +121,7 @@ MOVES: dict[str, Move] = {
     "glide_through": Move(
         key="glide_through",
         label="Interior glide",
-        camera="camera floats forward at chest height through the room and onward through the far opening, level horizon",
+        camera="camera floats forward at chest height through the space and onward through the far opening, level horizon",
         pacing="slow, gimbal-smooth, constant height",
         seconds=5,
         exterior=False,
@@ -179,7 +179,7 @@ MOVES: dict[str, Move] = {
     "ground_to_air": Move(
         key="ground_to_air",
         label="Ground to air",
-        camera="drone lifts vertically from ground level and cranes upward, gimbal tilting down to keep the property framed",
+        camera="camera lifts vertically and cranes upward, tilting down to keep {subject} framed",
         pacing="steady climb, no hesitation",
         seconds=6,
         exterior=True,
@@ -189,12 +189,38 @@ MOVES: dict[str, Move] = {
     "pull_out": Move(
         key="pull_out",
         label="Closing pull-out",
-        camera="drone climbs and pulls backward away from the property, revealing the surrounding land and horizon",
+        camera="camera climbs and pulls backward away from {subject}, revealing the surroundings",
         pacing="slow, decelerating to a hold",
         seconds=6,
         exterior=True,
         notes="Closing shot. Decelerate so the end card lands on a still frame.",
         tags=("closer",),
+    ),
+    "detail_push": Move(
+        key="detail_push",
+        label="Detail push-in",
+        camera="camera pushes slowly straight in on {subject}, framing tightening, no lateral drift",
+        pacing="very slow, constant, decelerating to a hold",
+        seconds=5,
+        exterior=False,
+        notes=(
+            "The beat that sells an interior or a finish. Not a travel move -- "
+            "the camera goes nowhere, it just closes distance on one thing. "
+            "Essential for advertising rhythm; a tour that only travels reads as "
+            "a walkthrough, not an ad."
+        ),
+        tags=("detail",),
+    ),
+    "detail_drift": Move(
+        key="detail_drift",
+        label="Detail drift",
+        camera="camera drifts slowly across {subject} at a fixed distance, holding focus on the surface",
+        pacing="very slow lateral drift, no acceleration",
+        seconds=5,
+        exterior=False,
+        notes="Second detail beat. Alternate with detail_push so consecutive "
+              "close-ups do not read as the same shot twice.",
+        tags=("detail",),
     ),
     "lateral_track": Move(
         key="lateral_track",
@@ -222,12 +248,24 @@ _RULES: tuple[tuple[str | None, str | None, str], ...] = (
 )
 
 
-def select(a: Room, b: Room, *, index: int, total: int) -> Move:
+DETAIL_KEYS: frozenset[str] = frozenset({
+    "detail", "material", "infotainment", "wheels", "odometer", "vin",
+    "label", "colorway",
+})
+
+
+def select(a: Room, b: Room, *, index: int, total: int,
+           alternate_orbit: bool = True) -> Move:
     """Pick the camera move for the transition from room a to room b.
 
     Deterministic: the same plan always yields the same moves, which is what makes
     a re-render reproducible and a client revision cheap.
     """
+    # A close-up destination is a detail beat, not a journey. Travelling into a
+    # steering wheel produces a lurch; pushing in produces an advert.
+    if b.key in DETAIL_KEYS:
+        return MOVES["detail_push"] if index % 2 == 0 else MOVES["detail_drift"]
+
     # Explicit rules first.
     for from_key, to_key, move_key in _RULES:
         if (from_key is None or from_key == a.key) and (to_key is None or to_key == b.key):
@@ -243,9 +281,14 @@ def select(a: Room, b: Room, *, index: int, total: int) -> Move:
     if not a.interior and b.interior:
         return MOVES["enter_from_light"]
 
-    # Both outside: alternate orbit direction so consecutive exteriors do not
-    # read as one long identical move.
+    # Both outside. For a building, alternating the orbit direction stops
+    # consecutive exteriors reading as one long identical move. For an object
+    # you walk around -- a vehicle, a product -- reversing mid-orbit looks
+    # broken, because the viewer is tracking one continuous circuit. The
+    # taxonomy decides which behaviour is correct via alternate_orbit.
     if not a.interior and not b.interior:
+        if not alternate_orbit:
+            return MOVES["orbit_left"]
         return MOVES["orbit_left"] if index % 2 == 0 else MOVES["orbit_right"]
 
     # Both inside. Lift on the way up the tour, settle on the way down.
@@ -256,33 +299,53 @@ def select(a: Room, b: Room, *, index: int, total: int) -> Move:
     return MOVES["glide_through"]
 
 
-def negative_prompt(move: Move) -> str:
-    """Build the negative prompt for a move from the shared banks."""
+def negative_prompt(move: Move, *, exterior_extra: tuple[str, ...] | None = None,
+                    interior_extra: tuple[str, ...] | None = None) -> str:
+    """Build the negative prompt for a move from the shared banks.
+
+    The extras are taxonomy-supplied because a suppression that protects one
+    vertical destroys another: "cars appearing, cars disappearing" keeps a
+    driveway stable in a property tour and deletes the subject of a vehicle
+    walkaround. Verticals that are not buildings pass their own.
+    """
     bank = list(BASE_NEGATIVE)
-    bank += list(EXTERIOR_NEGATIVE if move.exterior else INTERIOR_NEGATIVE)
+    if move.exterior:
+        bank += list(EXTERIOR_NEGATIVE if exterior_extra is None else exterior_extra)
+    else:
+        bank += list(INTERIOR_NEGATIVE if interior_extra is None else interior_extra)
     return ", ".join(bank)
 
 
-def build_prompt(move: Move, a: Room, b: Room, *, style: str) -> str:
+def build_prompt(move: Move, a: Room, b: Room, *, style: str,
+                 phrases: dict[str, str] | None = None,
+                 subject: str = "the house",
+                 subject_noun: str = "property",
+                 preserve: str = "architecture, furniture, materials and colours") -> str:
     """Compose the positive prompt for one shot.
 
     Order matters: camera instruction first (the model weights early tokens most),
     then pacing, then the continuity clause that tells it the two frames are the
     same real property, then the look.
     """
-    where = _phrase(a, b)
+    where = _phrase(a, b, phrases)
     return (
-        f"{move.camera}. {move.pacing}. "
+        f"{move.camera.format(subject=subject)}. {move.pacing}. "
         f"{where} "
-        "The first and last frames are photographs of the same real property; "
-        "preserve the exact architecture, furniture, materials and colours in both frames "
+        f"The first and last frames are photographs of the same real {subject_noun}; "
+        f"preserve the exact {preserve} in both frames "
         "and only move the camera between them. "
         f"{style}"
     )
 
 
-def _phrase(a: Room, b: Room) -> str:
-    names = {
+def _phrase(a: Room, b: Room, phrases: dict[str, str] | None = None) -> str:
+    """Say where the camera is going, in the vocabulary of the vertical.
+
+    Defaults to room language. A taxonomy that is not about rooms passes its own
+    map -- otherwise a car walkaround renders with the prompt "travelling from
+    the space to the space", which tells the model nothing and invites drift.
+    """
+    names = phrases if phrases is not None else {
         "street": "the street approach", "exterior": "the front of the house",
         "entry": "the entryway", "living": "the living room",
         "kitchen": "the kitchen", "dining": "the dining room",
@@ -317,5 +380,23 @@ STYLES: dict[str, str] = {
     "neutral": (
         "Even neutral lighting, true-to-life colour, realistic architectural "
         "photography, sharp focus throughout, cinematic 24fps."
+    ),
+    # Non-building verticals. "Architectural photography" is a real instruction
+    # to the model, not decoration -- it pulls toward straight verticals and
+    # wide interiors, which is wrong for an object shot.
+    "showroom": (
+        "Clean even showroom lighting, true-to-life colour, realistic commercial "
+        "automotive photography, glossy controlled reflections, sharp focus "
+        "throughout, cinematic 24fps."
+    ),
+    "lot": (
+        "Bright overcast daylight, true-to-life colour, realistic commercial "
+        "automotive photography, soft even shadows, sharp focus throughout, "
+        "cinematic 24fps."
+    ),
+    "studio": (
+        "Soft studio lighting on a seamless background, true-to-life colour, "
+        "realistic commercial product photography, controlled highlights, "
+        "sharp focus throughout, cinematic 24fps."
     ),
 }

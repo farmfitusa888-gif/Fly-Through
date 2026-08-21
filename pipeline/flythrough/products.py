@@ -121,6 +121,22 @@ SIDE: dict[str, str] = {
 # Anchor on the product-only frames and the tour still works.
 PERSON_RISK: frozenset[str] = frozenset({"in_use", "scale"})
 
+PHRASES: dict[str, str] = {
+    "hero": "the three-quarter view of the product",
+    "front": "the front of the product", "side": "the side of the product",
+    "back": "the back of the product", "top": "the product from above",
+    "detail": "a close detail of the product",
+    "material": "the surface material", "open": "the product opened",
+    "interior": "the inside of the product",
+    "scale": "the product held for scale", "in_use": "the product in use",
+    "packaging": "the packaging", "accessories": "the included accessories",
+    "colorway": "an alternate finish", "size_chart": "the size chart",
+    "label": "the label", "other": "the product",
+}
+
+# One continuous circuit around the object -- never reverse mid-orbit.
+ALTERNATE_ORBIT = False
+
 UNKNOWN = "other"
 
 

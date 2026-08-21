@@ -19,6 +19,26 @@ style tests. In the live business the agent supplies the photographs, so source
 imagery costs nothing and this module is irrelevant to unit economics. It is a
 production-cost tool, not a margin tool.
 
+## THE WORKING LOOP (verified 2026-08-21)
+
+The saving was previously written off because sliced tiles could not be returned
+to the provider as anchor frames. That was wrong. The loop closes:
+
+    1. Generate ONE 4K contact sheet          80 cr   (vs 160 cr for 4 stills)
+    2. Operator downloads it from the provider UI
+    3. Operator slices it:  flythrough.contactsheet.slice_sheet(...)   free
+    4. Operator uploads the tiles via the provider's upload picker      free
+    5. Read them back -- each returns a visualReference {type,id,url,label},
+       which is exactly the shape startFrame / endFrame require
+
+Verified by inspecting real upload records: uploads come back at full
+resolution with usable URLs, including one already at 2752x1536 -- the exact
+tile size a 4K sheet produces.
+
+**This is the default for any batch of 4+ stills we generate ourselves.** It is
+two extra manual steps and it halves the still cost every time. Use
+`decide(n, can_slice_locally=True)` to price it before ordering.
+
 It does NOT work for video. Video is billed per second of output at a flat rate
 (Wan 2.7: 25 cr/s at 720p, 35 cr/s at 1080p, linear and verified at 5s and 10s),
 so a long render sliced into shots costs exactly what the separate shots cost.
@@ -78,6 +98,45 @@ class SheetPlan:
             f"({self.tiles} x {TIER_CREDITS.get(tile_tier(self.tile_w, self.tile_h), 0)} cr)\n"
             f"  saving    {self.saving:>4} cr ({self.saving_pct:.0%})  {verdict}"
         )
+
+
+def decide(n_stills: int, *, can_slice_locally: bool, tier: str = "4K",
+           rows: int = 2, cols: int = 2) -> dict:
+    """THE GATE before ordering stills. Sheet or separate -- decide explicitly.
+
+    Written after ordering four separate 2K stills at 160 credits when one 4K
+    sheet would have cost 80. There was a legitimate reason -- the tiles could
+    not be sliced in that environment -- but the cost of the constraint was
+    never stated, so it read as an oversight rather than a decision.
+
+    `can_slice_locally` is the whole question. A contact sheet is only cheaper if
+    you can cut it up AND get the tiles back to the provider as anchor frames.
+    Where the provider's CDN is unreachable, a sheet is unusable for video work
+    no matter how good the price is.
+    """
+    plan = plan_sheet(tier, rows, cols)
+    sheets = -(-n_stills // plan.tiles)                # ceil
+    sheet_cost = sheets * plan.sheet_credits
+    separate_cost = n_stills * TIER_CREDITS["2K"]
+
+    if not can_slice_locally:
+        return {
+            "use_sheet": False,
+            "reason": ("cannot slice locally -- tiles could not be re-uploaded as "
+                       "anchor frames, so a sheet is unusable for video work here"),
+            "cost": separate_cost,
+            "forgone_saving": max(0, separate_cost - sheet_cost),
+        }
+    if sheet_cost >= separate_cost:
+        return {"use_sheet": False, "reason": "no saving at this count",
+                "cost": separate_cost, "forgone_saving": 0}
+    return {
+        "use_sheet": True,
+        "reason": f"{sheets} sheet(s) of {plan.tiles} tiles at {tier}",
+        "cost": sheet_cost,
+        "forgone_saving": 0,
+        "saving": separate_cost - sheet_cost,
+    }
 
 
 def tile_tier(w: int, h: int) -> str:
