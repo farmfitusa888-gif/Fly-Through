@@ -40,9 +40,10 @@ partner signed.**
 
 - [ ] 3 photographer partners active
 - [ ] 5+ retainers
-- [ ] Intake form runs `flythrough plan` on upload and surfaces warnings pre-payment
-- [ ] Originals page auto-publishes on delivery
-- [ ] Write the operator SOP so a contractor can run step 7
+- [x] Intake form runs the planner's own checks on upload and surfaces warnings
+      pre-payment — `/shoot/<id>` does it at the moment of capture
+- [x] Originals page auto-publishes on delivery
+- [x] Write the operator SOP so a contractor can run step 7 — `11-operator-sop.md`
 - [ ] Publish the first compliance-led content piece
 
 **Exit test: $5,000/mo with <20 operator hours, and one full job run
@@ -109,7 +110,7 @@ fails. The pipeline is already good enough to sell. Go sell it.
 
 Written after the build, so the roadmap and the repository agree.
 
-**Done and tested (231 tests):**
+**Done and tested (367 tests):**
 
 - The renderer, all three verticals, anchored end to end
 - Compliance as a pipeline stage: real estate cannot opt out of disclosure, and
@@ -121,6 +122,13 @@ Written after the build, so the roadmap and the repository agree.
 - The self-serve service: shop, upload-before-payment, signed webhooks, render
   queue, customer dashboard, partner ledger at 25% lifetime, admin queue view
 - Terms, privacy and refunds
+- The provider adapter: payloads validated against the provider's own recorded
+  schema before submission, HTTP submit/poll driven by an operator-supplied
+  connection profile
+- Shoot-time capture (`/shoot/<id>`) and the outcome loop (`/o/<id>`) — V3
+  items 1 and 2, built early because both compound and neither needs volume to
+  start working
+- The operator SOP (`11-operator-sop.md`)
 
 **Blocked on assets, not on code:**
 
