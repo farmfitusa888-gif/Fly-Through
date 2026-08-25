@@ -1,0 +1,24 @@
+{
+  "_note": "fal.ai queue API. Copy, set the model path in the three URLs, point FLYTHROUGH_PROVIDER at the copy, and put the key in FLYTHROUGH_PROVIDER_TOKEN.",
+
+  "_sourced": "Queue mechanics verified from fal.ai's Queue API documentation, August 2026: POST https://queue.fal.run/{model-path} with 'Authorization: Key <KEY>' returns request_id; GET .../requests/{id}/status returns status with IN_QUEUE / IN_PROGRESS / COMPLETED; the finished output comes from GET .../requests/{id}, which is why result_url is set separately.",
+
+  "_confirm_before_first_paid_run": "The INPUT field names (image_url, end_image_url, prompt, negative_prompt, resolution, duration) come from fal's model listings rather than from the model's own API page, which this build environment cannot reach. Open the endpoint's API tab, confirm them, and record the schema before spending money. A wrong field name is a rejected job you paid for.",
+
+  "submit_url": "https://queue.fal.run/REPLACE-WITH-MODEL-PATH",
+  "status_url": "https://queue.fal.run/REPLACE-WITH-MODEL-PATH/requests/{id}/status",
+  "result_url": "https://queue.fal.run/REPLACE-WITH-MODEL-PATH/requests/{id}",
+
+  "body_mode": "params",
+  "auth_header": "Authorization",
+  "auth_format": "Key {token}",
+
+  "job_id_path": "request_id",
+  "status_path": "status",
+  "result_path": "video.url",
+
+  "done_values": ["COMPLETED"],
+  "failed_values": ["FAILED", "ERROR", "CANCELLED"],
+
+  "timeout_s": 60.0
+}

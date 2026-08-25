@@ -66,6 +66,15 @@ class Connection:
     submit_url: str
     status_url: str
     token: str
+    # Some providers return the finished output from the STATUS endpoint; others
+    # (fal.ai among them) make status and result separate calls, and reading the
+    # video URL off the status body would find nothing there forever. Leave
+    # empty when status carries the result.
+    result_url: str = ""
+    # How the request body is shaped. "params" posts the model input directly,
+    # which is what a per-model endpoint expects. "wrapped" nests it under
+    # model/mode/params for a single generic endpoint.
+    body_mode: str = "wrapped"
     auth_header: str = "Authorization"
     auth_format: str = "Bearer {token}"
     job_id_path: str = "id"
@@ -73,12 +82,20 @@ class Connection:
     result_path: str = "output.url"
     done_values: tuple[str, ...] = ("DONE", "COMPLETED", "SUCCEEDED", "succeeded")
     failed_values: tuple[str, ...] = ("FAILED", "ERROR", "CANCELLED", "failed")
+    # Providers that queue report a distinct in-progress state; anything not in
+    # done_values or failed_values is treated as pending anyway, so this exists
+    # only to catch a provider that invents a third terminal state.
     timeout_s: float = 60.0
 
     @classmethod
     def from_file(cls, path: str | Path, token: str) -> "Connection":
         raw = json.loads(Path(path).read_text())
-        raw.pop("_note", None)
+        # Leading underscore means documentation. A profile is the one place an
+        # operator records WHERE a value came from and what still needs
+        # confirming, and that note is worth more than the tidiness of a bare
+        # config file. Everything else is checked strictly, so a typo'd real key
+        # still fails loudly instead of silently falling back to a default.
+        raw = {k: v for k, v in raw.items() if not k.startswith("_")}
         known = {f for f in cls.__dataclass_fields__ if f != "token"}
         unknown = set(raw) - known
         if unknown:
@@ -126,7 +143,11 @@ def make(conn: Connection, *, model: str = "wan2-7", mode: str = "image2video"):
 
     def submit(job) -> str:
         validate(job.params, profile)
-        payload = {"model": job.model, "mode": job.mode, "params": job.params}
+        if conn.body_mode not in ("params", "wrapped"):
+            raise ProviderError(f"unknown body_mode {conn.body_mode!r}")
+        payload = (job.params if conn.body_mode == "params"
+                   else {"model": job.model, "mode": job.mode,
+                         "params": job.params})
         resp = conn._request(conn.submit_url, payload)
         job_id = dig(resp, conn.job_id_path)
         if not job_id:
@@ -139,7 +160,10 @@ def make(conn: Connection, *, model: str = "wan2-7", mode: str = "image2video"):
         resp = conn._request(conn.status_url.format(id=job_id))
         raw = str(dig(resp, conn.status_path) or "")
         if raw in conn.done_values:
-            url = dig(resp, conn.result_path)
+            # Fetch the result separately when the provider keeps it apart.
+            body = (conn._request(conn.result_url.format(id=job_id))
+                    if conn.result_url else resp)
+            url = dig(body, conn.result_path)
             if not url:
                 # Finished with no file is a provider bug, not a pending job.
                 # Reporting PENDING here would hang the batch until timeout.

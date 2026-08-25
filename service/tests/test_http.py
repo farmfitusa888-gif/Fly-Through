@@ -1065,3 +1065,26 @@ def test_hsts_only_in_production(client, tmp_path, monkeypatch):
     """Sending HSTS from a dev server on http pins a name to https on the
     developer's own machine."""
     assert "strict-transport-security" not in client.get("/").headers
+
+
+def test_an_upload_with_no_file_says_so(client, app):
+    """It used to 303 with no row and nothing said, so a customer whose picker
+    was cancelled saw a page that looked like it worked and was quietly missing
+    a shot. They would only find out at the payment gate."""
+    sign_in(client, app)
+    oid = start_order(client)
+    csrf = csrf_of(client, app, f"/order/{oid}")
+    r = client.post(f"/order/{oid}/upload", data={"csrf": csrf, "slot": "kitchen"},
+                    follow_redirects=False)
+    assert "err=" in r.headers["location"]
+    assert "no+photograph" in r.headers["location"].replace("%20", "+")
+
+
+def test_an_empty_upload_from_the_shot_list_shows_the_error(client, app):
+    sign_in(client, app)
+    oid = start_order(client)
+    csrf = csrf_of(client, app, f"/shoot/{oid}")
+    r = client.post(f"/order/{oid}/upload", data={"csrf": csrf, "slot": "kitchen"},
+                    headers={"referer": f"http://testserver/shoot/{oid}"},
+                    follow_redirects=False)
+    assert f"/shoot/{oid}" in r.headers["location"] and "err=" in r.headers["location"]

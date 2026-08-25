@@ -301,3 +301,127 @@ def test_the_example_profile_loads(tmp_path):
 def test_the_token_is_never_written_into_a_profile():
     example = ROOT / "flythrough" / "providers" / "connection.example.json"
     assert "token" not in json.loads(example.read_text())
+
+
+# ------------------------------------------- providers that split status/result
+
+
+class _Queue(http.server.BaseHTTPRequestHandler):
+    """Shaped like fal.ai: submit returns request_id, status and result are
+    separate GETs, and the video URL only ever appears on the result."""
+    script: dict = {}
+
+    def log_message(self, *a):
+        pass
+
+    def _send(self, obj, code=200):
+        b = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length", 0))
+        self.script["body"] = json.loads(self.rfile.read(n) or "{}")
+        self.script["auth"] = self.headers.get("Authorization")
+        self._send({"request_id": "req-42"})
+
+    def do_GET(self):
+        if self.path.endswith("/status"):
+            self.script["status_calls"] = self.script.get("status_calls", 0) + 1
+            seq = self.script.get("seq", ["IN_QUEUE", "IN_PROGRESS", "COMPLETED"])
+            i = min(self.script["status_calls"] - 1, len(seq) - 1)
+            self._send({"status": seq[i]})
+        else:
+            self.script["result_calls"] = self.script.get("result_calls", 0) + 1
+            self._send(self.script.get("result",
+                                       {"video": {"url": "https://cdn/out.mp4"}}))
+
+
+@pytest.fixture()
+def queue_provider():
+    _Queue.script = {}
+    srv = socketserver.TCPServer(("127.0.0.1", 0), _Queue)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}/model"
+    yield _Queue.script, Connection(
+        submit_url=base,
+        status_url=base + "/requests/{id}/status",
+        result_url=base + "/requests/{id}",
+        body_mode="params", auth_format="Key {token}",
+        job_id_path="request_id", result_path="video.url",
+        done_values=("COMPLETED",), token="FALKEY", timeout_s=5)
+    srv.shutdown()
+
+
+def test_a_split_status_and_result_provider_works(queue_provider):
+    """Reading the video URL off the STATUS body would find nothing there,
+    forever -- the batch would time out looking healthy the whole time."""
+    script, conn = queue_provider
+    submit, poll = make(conn)
+    jid = submit(OpenArtAdapter().build(None, a_shot()))
+    assert jid == "req-42"
+    assert poll(jid) == ("PENDING", None)
+    assert poll(jid) == ("PENDING", None)
+    assert poll(jid) == ("DONE", "https://cdn/out.mp4")
+
+
+def test_the_result_endpoint_is_only_called_once_finished(queue_provider):
+    """Polling the result of an unfinished job is a wasted round trip against
+    a provider that rate-limits."""
+    script, conn = queue_provider
+    _, poll = make(conn)
+    poll("req-42")
+    poll("req-42")
+    assert script.get("result_calls") is None
+    poll("req-42")
+    assert script["result_calls"] == 1
+
+
+def test_params_body_mode_posts_the_model_input_directly(queue_provider):
+    """A per-model endpoint expects the input at the top level. Nesting it
+    under model/mode/params sends a body the endpoint ignores entirely."""
+    script, conn = queue_provider
+    submit, _ = make(conn)
+    submit(OpenArtAdapter().build(None, a_shot()))
+    assert "params" not in script["body"]
+    assert script["body"]["duration"] == 4
+    assert script["auth"] == "Key FALKEY"
+
+
+def test_an_unknown_body_mode_is_refused(queue_provider):
+    script, conn = queue_provider
+    conn.body_mode = "sideways"
+    submit, _ = make(conn)
+    with pytest.raises(ProviderError) as e:
+        submit(OpenArtAdapter().build(None, a_shot()))
+    assert "body_mode" in str(e.value)
+
+
+def test_documentation_keys_are_allowed_but_typos_are_not(tmp_path):
+    """A profile is where an operator records where a value came from and what
+    still needs confirming. That note is worth more than a bare config file --
+    but a typo'd REAL key must still fail rather than silently defaulting."""
+    good = tmp_path / "g.json"
+    good.write_text(json.dumps({
+        "_sourced": "from the provider docs, August 2026",
+        "_confirm": "field names before the first paid run",
+        "submit_url": "https://x", "status_url": "https://x/{id}"}))
+    assert Connection.from_file(good, "t").submit_url == "https://x"
+
+    bad = tmp_path / "b.json"
+    bad.write_text(json.dumps({"submit_url": "https://x",
+                               "status_url": "https://x/{id}",
+                               "statuspath": "state"}))
+    with pytest.raises(ProviderError):
+        Connection.from_file(bad, "t")
+
+
+def test_the_shipped_example_profiles_all_load():
+    d = ROOT / "flythrough" / "providers"
+    for f in sorted(d.glob("*.example.json")):
+        conn = Connection.from_file(f, "tok")
+        assert conn.submit_url and "{id}" in conn.status_url, f.name
+        assert "token" not in json.loads(f.read_text()), f"{f.name} holds a secret"

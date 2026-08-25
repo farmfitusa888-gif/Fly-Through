@@ -443,6 +443,13 @@ def create_app(settings: Settings | None = None, *, renderer=None,
                             else mod.resolve(Path(f.filename or "").stem).key),
                            pos, now()))
             added += 1
+        if not added and not errs:
+            # A POST that carried no file at all. It used to return 303 with no
+            # row created and nothing said, so a customer whose picker was
+            # cancelled -- or whose browser dropped the attachment -- saw a page
+            # that looked like it had worked and was missing a shot. Silence is
+            # the worst possible answer here: they only find out at the gate.
+            errs.append("no photograph came through — tap the row and pick again")
         q = f"?msg={quote(f'{added} added')}" if added else ""
         if errs:
             q = f"?err={quote('; '.join(errs[:3]))}"
@@ -780,6 +787,9 @@ def create_app(settings: Settings | None = None, *, renderer=None,
             ("rear", "Back", "Square to the tailgate."),
             ("passenger_side", "Passenger side", "Same as driver side, other face."),
             ("wheels", "One wheel", "Crouch. Caliper and badge visible."),
+            ("engine", "Engine bay", "Hood fully up, shot from the front corner."),
+            ("rear_seats", "Back seats",
+             "From the open rear door. Seat backs and legroom visible."),
             ("door_open", "Driver's door open",
              "From outside looking in. This is what carries the camera inside."),
             ("infotainment", "Centre screen", "Screen ON, home screen showing."),
@@ -797,6 +807,8 @@ def create_app(settings: Settings | None = None, *, renderer=None,
             ("top", "From above", "Directly overhead."),
             ("material", "The surface", "Rake the light across it, do not flatten it."),
             ("open", "Opened", "Lid off, unfolded, unzipped."),
+            ("colorway", "Other finishes", "Same angle as the hero, each finish."),
+            ("packaging", "The box", "As it arrives."),
         ],
     }
 
@@ -831,6 +843,12 @@ def create_app(settings: Settings | None = None, *, renderer=None,
             {"filename": u["filename"], "path": "", "room_key": u["room_key"],
              "position": i} for i, u in enumerate(ups, 1)])
 
+        # The curated list is a subset on purpose -- a phone screen with twenty
+        # rows is a screen nobody scrolls. But a customer who followed the guide
+        # and took a shot we did not prompt for must still be able to send it,
+        # so the list ends with a catch-all that classifies by filename. Without
+        # it, "which shots can I upload" and "which shots did we ask for" are
+        # two different lists, and only one of them is written down.
         rows = []
         for key, label, howto in SHOOT_LIST[o["vertical"]]:
             done = key in have
@@ -849,6 +867,17 @@ def create_app(settings: Settings | None = None, *, renderer=None,
                 f'<input type="file" name="files" accept="image/*" '
                 f'capture="environment" data-autosubmit>'
                 f'</form></li>')
+
+        rows.append(
+            f'<li class="shot">'
+            f'<div class="hd"><span class="tick"></span><strong>Anything else</strong>'
+            f'</div>'
+            f'<p>A shot from the guide we did not ask for above. Name the file '
+            f'after what it is and we will file it correctly.</p>'
+            f'<form method="post" action="/order/{esc(order_id)}/upload" '
+            f'enctype="multipart/form-data">{csrf_field(request)}'
+            f'<input type="file" name="files" accept="image/*" multiple '
+            f'data-autosubmit></form></li>')
 
         missing = [k for k in needed if k not in have]
         if missing:
