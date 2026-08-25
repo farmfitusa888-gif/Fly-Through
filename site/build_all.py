@@ -32,6 +32,7 @@ STEPS = [
     ("disclosure pages", [sys.executable, str(HERE / "build_site.py")]),
     ("shot guide pages", [sys.executable, str(HERE / "build_guides.py")]),
     ("post-checkout intake", [sys.executable, str(HERE / "build_start.py")]),
+    ("legal pages", [sys.executable, str(HERE / "build_legal.py")]),
 ]
 
 # src too, not just href: the full-length films are referenced only by <source>,
@@ -127,7 +128,7 @@ def deploy_files() -> None:
         rel = f.relative_to(DIST).parent.as_posix()
         path = "/" if rel == "." else f"/{rel}/"
         if path.startswith("/start"):
-            continue
+            continue          # per-order, useless in an index
         pages.append(path)
     urls = "\n".join(
         f"  <url><loc>https://{domain}{p}</loc></url>" for p in pages)

@@ -60,7 +60,11 @@ Ranked by expected value, and deliberately **not started early**:
    product, with no person in frame, has none of that exposure and reuses the
    entire pipeline.
 
-2. **Self-serve product.** Upload, pay, receive. Justified only once the manual
+2. **Self-serve product.** ✅ **BUILT** (`service/`) — upload, pay, receive,
+   re-order, refer. Runnable now. Deliberately built AHEAD of the original
+   sequencing because the manual workflow it automates is the same pipeline,
+   already tested; what remains unvalidated is demand, not mechanism.
+   The original caution stands and is worth re-reading: justified only once the manual
    workflow is provably stable — building it earlier means automating a process
    still being discovered. This is the "productize later" half of the strategy.
 3. **White-label for brokerages.** Their branding, our pipeline, per-seat pricing.
@@ -98,3 +102,33 @@ Ranked by expected value, and deliberately **not started early**:
 
 Building product before Phase 1's exit test passes is the most likely way this
 fails. The pipeline is already good enough to sell. Go sell it.
+
+---
+
+## Where this actually stands
+
+Written after the build, so the roadmap and the repository agree.
+
+**Done and tested (231 tests):**
+
+- The renderer, all three verticals, anchored end to end
+- Compliance as a pipeline stage: real estate cannot opt out of disclosure, and
+  the site refuses to publish a disclosure page whose originals are missing
+- The marketing site, priced entirely from the model — no price is typed into a
+  page, enforced by a test
+- Client shot guides for all three verticals, generated from the taxonomies
+- The store: 13 SKUs, singles and packages, Payment Links, post-checkout intake
+- The self-serve service: shop, upload-before-payment, signed webhooks, render
+  queue, customer dashboard, partner ledger at 25% lifetime, admin queue view
+- Terms, privacy and refunds
+
+**Blocked on assets, not on code:**
+
+- 10 of the 15 rendered car beats (5 present; the rest are inside a 300 MB zip
+  that no available transfer route can carry — the individual MP4s can)
+- The 6 unedited house originals, without which the disclosure page for
+  1420 Cedar Ridge cannot be published and the film cannot ship as a delivered
+  listing video
+
+**Not started, and correctly so:** everything in `10-v3.md`. Phase 1 has not
+passed. No one has paid yet, and that is still the only number that matters.

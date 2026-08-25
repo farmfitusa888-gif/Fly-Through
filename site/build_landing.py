@@ -562,6 +562,7 @@ def build() -> Path:
 <footer>
   <div class="wrap foot">
     <span>{d['brand']} · {d['domain']}</span>
+    <span class="mono"><a href="/terms/">Terms</a> · <a href="/privacy/">Privacy</a> · <a href="/refunds/">Refunds</a> · <a href="/shot-guide/">Shot guides</a></span>
     <span class="mono">Anchored AI video · every shot begins and ends on a real photograph</span>
   </div>
 </footer>
