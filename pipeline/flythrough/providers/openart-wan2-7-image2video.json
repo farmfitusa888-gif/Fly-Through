@@ -1,0 +1,25 @@
+{
+  "_source": "openart_model_form_get(model='wan2-7', mode='image2video'), read from the live provider 2026-08-25. Recorded verbatim so the payload can be validated without a network call and without spending a credit.",
+  "_why": "Payload drift is silent and expensive: a rejected job is a failed render the customer already paid for, and a wrong field name looks exactly like a provider outage. Validating against the real schema catches it in CI.",
+  "model": "wan2-7",
+  "mode": "image2video",
+  "media": "video",
+  "required": ["videoCount", "startFrame", "resolution", "duration",
+               "negativePrompt", "enablePromptExpansion"],
+  "additionalProperties": false,
+  "fields": {
+    "prompt": {"type": "string"},
+    "negativePrompt": {"type": "string", "default": ""},
+    "videoCount": {"type": "integer", "minimum": 1, "maximum": 8, "default": 1},
+    "resolution": {"type": "string", "enum": ["720p", "1080p"], "default": "720p"},
+    "duration": {"type": "integer", "minimum": 2, "maximum": 15, "default": 5},
+    "enablePromptExpansion": {"type": "boolean", "default": true},
+    "startFrame": {"type": "frame"},
+    "endFrame": {"type": "frame", "nullable": true}
+  },
+  "frame": {
+    "required": ["type", "id", "url", "label"],
+    "additionalProperties": false,
+    "type_const": "image"
+  }
+}

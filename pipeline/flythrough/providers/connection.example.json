@@ -1,0 +1,18 @@
+{
+  "_note": "Copy this, fill it in from your own provider account, and point FLYTHROUGH_PROVIDER at the copy. The TOKEN does not go in here -- it goes in FLYTHROUGH_PROVIDER_TOKEN, so a profile can be committed, diffed and code-reviewed without a credential in it. Every value below is read from the provider's own API documentation; none of it is guessed on your behalf, because a wrong endpoint fails only once real money is behind it.",
+
+  "submit_url": "https://REPLACE-ME/api/v1/jobs",
+  "status_url": "https://REPLACE-ME/api/v1/jobs/{id}",
+
+  "auth_header": "Authorization",
+  "auth_format": "Bearer {token}",
+
+  "job_id_path": "id",
+  "status_path": "status",
+  "result_path": "output.url",
+
+  "done_values": ["DONE", "COMPLETED", "SUCCEEDED", "succeeded"],
+  "failed_values": ["FAILED", "ERROR", "CANCELLED", "failed"],
+
+  "timeout_s": 60.0
+}

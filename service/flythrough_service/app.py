@@ -71,22 +71,42 @@ def default_renderer(*, order_id, vertical, slug, originals, out_dir, brief,
                         originals_url=originals_url)
 
 
-def provider_from_env():
+def provider_from_env(model: str = "wan2-7", mode: str = "image2video"):
     """(submit, poll) for the configured render provider.
 
-    Kept as one small seam because the provider is the single most likely thing
-    to change: OpenArt today, something else the moment a model with better
-    dual-frame anchoring ships. Nothing above this function knows the vendor.
+    One small seam, because the provider is the single most likely thing in this
+    system to change: the moment a model with better dual-frame anchoring ships,
+    we move. Nothing above this function knows the vendor.
+
+    FLYTHROUGH_PROVIDER  path to a connection profile (JSON)
+    FLYTHROUGH_PROVIDER_TOKEN  the credential, environment only, never on disk
+
+    The endpoint and response paths come from the operator's own provider
+    account. They are not guessed here: inventing a URL produces a component
+    that looks finished, passes review, and fails the first time real money is
+    behind it.
     """
     import os
-    profile = os.environ.get("FLYTHROUGH_PROVIDER", "")
+    import sys
+    root = Path(__file__).resolve().parents[2]
+    if str(root / "pipeline") not in sys.path:
+        sys.path.insert(0, str(root / "pipeline"))
+    from flythrough.providers.http import Connection, make
+
+    profile = os.environ.get("FLYTHROUGH_PROVIDER", "").strip()
+    token = os.environ.get("FLYTHROUGH_PROVIDER_TOKEN", "").strip()
     if not profile:
         raise RuntimeError(
-            "no render provider configured. Set FLYTHROUGH_PROVIDER and the "
-            "provider credentials, or pass renderer= to create_app().")
-    raise RuntimeError(
-        f"provider {profile!r} has no submit/poll implementation in this build. "
-        "Add it in pipeline/flythrough/providers/ and wire it here.")
+            "no render provider configured. Set FLYTHROUGH_PROVIDER to a "
+            "connection profile (see pipeline/flythrough/providers/"
+            "connection.example.json), or pass renderer= to create_app().")
+    if not token:
+        raise RuntimeError(
+            "FLYTHROUGH_PROVIDER_TOKEN is not set. The credential belongs in "
+            "the environment, never in the profile on disk.")
+    if not Path(profile).is_file():
+        raise RuntimeError(f"provider profile not found: {profile}")
+    return make(Connection.from_file(profile, token), model=model, mode=mode)
 
 
 def safe_next(target: str) -> str:
