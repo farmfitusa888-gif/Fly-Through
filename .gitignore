@@ -8,3 +8,7 @@ work/
 *.mp4
 !samples/**/*.mp4
 .env
+# Service runtime state: the SQLite database, uploaded originals and rendered
+# deliverables. Real customer files -- never in git, and the reason `cp` of this
+# one directory is the entire backup procedure.
+service/data/
