@@ -1109,3 +1109,79 @@ def test_every_sku_gets_a_working_button_at_every_rung():
     finally:
         bl.CONFIG.clear()
         bl.CONFIG.update(saved)
+
+
+# ------------------------------------------------------------ provider switch
+
+
+def test_cost_is_expressible_in_dollars_per_second():
+    """Credits are OpenArt's unit, not a universal one. Every downstream
+    calculation wants dollars per second of finished video."""
+    from flythrough.cost import usd_per_second
+    assert usd_per_second("wan2-7", "1080p") == pytest.approx(0.105)
+
+
+def test_an_unpriced_provider_refuses_rather_than_guessing():
+    """An invented rate produces a margin table that looks authoritative and is
+    wrong, and pricing is the one place this business cannot afford that."""
+    from flythrough.cost import FAL, usd_per_second
+    assert not FAL.verified
+    with pytest.raises(KeyError) as e:
+        usd_per_second("wan2-7", "1080p", FAL)
+    assert "do not estimate" in str(e.value)
+
+
+def test_comparing_against_an_unpriced_provider_refuses():
+    from flythrough.cost import FAL, OPENART, compare
+    with pytest.raises(KeyError):
+        compare("wan2-7", "1080p", OPENART, FAL)
+
+
+def test_a_usd_native_provider_needs_no_credit_conversion():
+    """Most providers bill per second directly. Forcing them through a credit
+    price would invent an exchange rate that does not exist."""
+    from flythrough.cost import Provider, USD_PER_SECOND
+    p = Provider(name="test", unit=USD_PER_SECOND,
+                 rates={("wan2-7", "1080p"): 0.08}, verified=True)
+    assert p.usd_per_second("wan2-7", "1080p") == 0.08
+
+
+def test_the_switch_tool_reports_nothing_below_cost_at_todays_rate():
+    import importlib
+    root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(root / "model"))
+    ps = importlib.import_module("provider_switch")
+    from flythrough.cost import usd_per_second
+    current = usd_per_second("wan2-7", "1080p")
+    import catalog
+    for sku in catalog.CATALOG:
+        assert ps.margin_at(sku, current)["gp"] > 0, sku.id
+
+
+def test_the_catalogue_survives_a_ten_times_worse_render_rate():
+    """Headroom, measured rather than assumed. If a 10x provider change could
+    put a SKU underwater, the price is too close to the cost to be safe."""
+    import importlib
+    root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(root / "model"))
+    ps = importlib.import_module("provider_switch")
+    from flythrough.cost import usd_per_second
+    import catalog
+    ten_x = usd_per_second("wan2-7", "1080p") * 10
+    underwater = [s.id for s in catalog.CATALOG
+                  if ps.margin_at(s, ten_x)["gp"] <= 0]
+    assert not underwater, f"underwater at 10x render cost: {underwater}"
+
+
+def test_the_switch_tool_flags_a_sku_that_would_sell_below_cost():
+    """The whole point. A rate that breaks something must be reported, not
+    absorbed into a slightly worse margin column."""
+    import importlib
+    root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(root / "model"))
+    ps = importlib.import_module("provider_switch")
+    import catalog
+    absurd = 2.0
+    underwater = [s.id for s in catalog.CATALOG
+                  if ps.margin_at(s, absurd)["gp"] <= 0]
+    assert underwater, "a $2/sec rate should sink the volume plans"

@@ -48,6 +48,74 @@ USD_PER_CREDIT_VERIFIED: bool = True
 REROLL_RATE: float = 0.25
 
 
+# --- providers ---------------------------------------------------------------
+# Credits are OpenArt's unit, not a universal one. Most providers bill in
+# dollars per second of finished video, and a model that can only think in
+# credits cannot answer the question that actually matters when switching:
+# does the margin move?
+#
+# So a provider is a name, a billing unit, and a way to get to USD per second.
+# The credit path below is unchanged and still verified; the USD path exists so
+# an alternative can be priced without pretending it uses credits.
+#
+# NOTHING IS PRE-FILLED for a provider whose pricing has not been read from its
+# own page. An invented rate is worse than no rate: it produces a margin table
+# that looks authoritative and is wrong, and pricing is the one place this
+# business cannot afford to be confidently mistaken.
+
+CREDITS, USD_PER_SECOND = "credits", "usd_per_second"
+
+
+@dataclass(frozen=True)
+class Provider:
+    name: str
+    unit: str
+    # (model, tier) -> credits/sec for CREDITS, or USD/sec for USD_PER_SECOND.
+    rates: dict[tuple[str, str], float]
+    usd_per_credit: float = 0.0
+    verified: bool = False
+    source: str = ""
+
+    def usd_per_second(self, model: str, tier: str) -> float:
+        key = (model, tier)
+        if key not in self.rates:
+            known = ", ".join(f"{m}@{t}" for m, t in sorted(self.rates)) or "none"
+            raise KeyError(
+                f"{self.name} has no recorded rate for {model}@{tier}. "
+                f"Recorded: {known}. Read it from the provider's own pricing "
+                f"page and add it -- do not estimate, a wrong rate produces a "
+                f"margin table that looks authoritative and is not.")
+        if self.unit == CREDITS:
+            return self.rates[key] * self.usd_per_credit
+        return self.rates[key]
+
+
+OPENART = Provider(
+    name="openart",
+    unit=CREDITS,
+    rates={k: float(v) for k, v in RATE_CARD.items()},
+    usd_per_credit=USD_PER_CREDIT,
+    verified=True,
+    source="openart_model_cost 2026-08-20; credit price confirmed by the "
+           "account holder 2026-08-21 (5,000 for $15).",
+)
+
+# A candidate second source. Wan 2.7 there does 1080p, 15s and first+last frame
+# anchoring, which is what this pipeline needs -- but the PRICE has not been
+# read, so there is nothing here. Fill it from fal's own pricing page and set
+# verified=True, and every number downstream updates.
+FAL = Provider(
+    name="fal",
+    unit=USD_PER_SECOND,
+    rates={},
+    verified=False,
+    source="queue API verified from fal's docs 2026-08-25; PRICING NOT READ.",
+)
+
+PROVIDERS: dict[str, Provider] = {p.name: p for p in (OPENART, FAL)}
+ACTIVE: Provider = OPENART
+
+
 @dataclass(frozen=True)
 class Quote:
     """Cost of rendering one plan, with rework priced in."""
@@ -84,6 +152,33 @@ class Quote:
             f"  worst     {self.worst_case_credits:>6} cr  ${self.worst_case_usd:>7.2f}"
             f"   (every shot re-rolled once){dollar_note}"
         )
+
+
+def usd_per_second(model: str, tier: str,
+                   provider: Provider | None = None) -> float:
+    """What one second of finished video costs, whoever is rendering it.
+
+    The unit every downstream calculation actually wants. Credits are an
+    implementation detail of one provider.
+    """
+    return (provider or ACTIVE).usd_per_second(model, tier)
+
+
+def compare(model: str, tier: str, a: Provider, b: Provider) -> dict:
+    """Side by side, with the honesty of both stated.
+
+    Refuses rather than guessing when either side has no recorded rate: the
+    whole point of this function is to inform a switch, and a comparison
+    against an invented number would recommend one on no evidence.
+    """
+    a_usd = a.usd_per_second(model, tier)
+    b_usd = b.usd_per_second(model, tier)
+    return {
+        "model": f"{model}@{tier}",
+        a.name: a_usd, b.name: b_usd,
+        "delta_pct": (b_usd - a_usd) / a_usd if a_usd else 0.0,
+        "both_verified": a.verified and b.verified,
+    }
 
 
 def rate(model: str, tier: str) -> int:
