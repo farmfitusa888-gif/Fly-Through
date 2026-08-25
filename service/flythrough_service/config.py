@@ -27,7 +27,6 @@ def _load(name: str) -> dict:
 class Settings:
     # --- identity -----------------------------------------------------------
     brand: str
-    parent_brand: str
     domain: str
     short_domain: str
     contact_email: str
@@ -79,7 +78,6 @@ def load(data_dir: Path | None = None, *, dev: bool | None = None) -> Settings:
     dev_mode = os.environ.get("FLYTHROUGH_ENV", "dev") != "production" if dev is None else dev
     s = Settings(
         brand=cfg["brand"],
-        parent_brand=cfg.get("parent_brand", cfg["brand"]),
         domain=cfg["domain"],
         short_domain=cfg["short_domain"],
         contact_email=cfg["contact_email"],

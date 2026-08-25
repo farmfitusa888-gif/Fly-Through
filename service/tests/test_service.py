@@ -2,6 +2,7 @@
 
 import sqlite3
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -128,3 +129,488 @@ def test_ids_are_unguessable():
     ids = {new_id("ord") for _ in range(500)}
     assert len(ids) == 500
     assert all(len(i.split("_", 1)[1]) >= 20 for i in ids)
+
+
+# ---------------------------------------------------------------------- storage
+
+import io  # noqa: E402
+
+from flythrough_service import (auth, catalog_bridge as cat, orders,  # noqa: E402
+                                payments, queue as q, render, reseller)
+from flythrough_service.storage import Store, UploadRejected, sniff  # noqa: E402
+
+JPEG = b"\xff\xd8\xff\xe0" + b"x" * 4096
+
+
+@pytest.fixture()
+def store(tmp_path):
+    return Store(tmp_path / "blobs")
+
+
+def test_identical_uploads_share_one_blob(store):
+    a = store.put(io.BytesIO(JPEG), max_bytes=10**7, allowed=frozenset({"image/jpeg"}))
+    b = store.put(io.BytesIO(JPEG), max_bytes=10**7, allowed=frozenset({"image/jpeg"}))
+    assert a.sha256 == b.sha256 and a.path == b.path
+
+
+def test_originals_are_read_only_once_stored(store):
+    """The compliance position is that the file on the originals page is the
+    file the client sent. An editable original is that claim with a hole in it."""
+    s = store.put(io.BytesIO(JPEG), max_bytes=10**7, allowed=frozenset({"image/jpeg"}))
+    assert oct(s.path.stat().st_mode)[-3:] == "444"
+
+
+@pytest.mark.parametrize("data,why", [
+    (b"%PDF-1.4 not a photo", "wrong magic bytes"),
+    (b"", "empty"),
+    (b"GIF89a" + b"x" * 100, "unsupported type"),
+])
+def test_uploads_are_sniffed_not_trusted(store, data, why):
+    """Content-Type is whatever the client says it is. Renaming invoice.pdf to
+    photo.jpg is a two-second attack."""
+    with pytest.raises(UploadRejected):
+        store.put(io.BytesIO(data), max_bytes=10**7,
+                  allowed=frozenset({"image/jpeg", "image/png"}))
+
+
+def test_size_cap_stops_mid_stream(store):
+    with pytest.raises(UploadRejected) as e:
+        store.put(io.BytesIO(JPEG), max_bytes=512, allowed=frozenset({"image/jpeg"}))
+    assert "0 MB" not in str(e.value)      # was a real copy bug
+
+
+def test_sniff_recognises_every_type_we_accept():
+    assert sniff(b"\xff\xd8\xff") == "image/jpeg"
+    assert sniff(b"\x89PNG\r\n\x1a\n") == "image/png"
+    assert sniff(b"RIFF\x00\x00\x00\x00WEBPVP8 ") == "image/webp"
+    assert sniff(b"\x00\x00\x00\x18ftypheic") == "image/heic"
+    assert sniff(b"nothing") is None
+
+
+# ------------------------------------------------------------------------- auth
+
+
+def test_magic_link_is_single_use(db):
+    t = auth.issue_login_token(db, "a@b.com", ttl_s=600)
+    auth.redeem_login_token(db, t, session_ttl_s=60)
+    with pytest.raises(auth.AuthError):
+        auth.redeem_login_token(db, t, session_ttl_s=60)
+
+
+def test_magic_link_expires(db):
+    t = auth.issue_login_token(db, "a@b.com", ttl_s=-1)
+    with pytest.raises(auth.AuthError):
+        auth.redeem_login_token(db, t, session_ttl_s=60)
+
+
+def test_requesting_a_new_link_kills_the_old_one(db):
+    """A link left in a forwarded thread must stop working the moment the real
+    owner asks for another."""
+    first = auth.issue_login_token(db, "a@b.com", ttl_s=600)
+    auth.issue_login_token(db, "a@b.com", ttl_s=600)
+    with pytest.raises(auth.AuthError):
+        auth.redeem_login_token(db, first, session_ttl_s=60)
+
+
+def test_tokens_are_never_stored_in_the_clear(db):
+    t = auth.issue_login_token(db, "a@b.com", ttl_s=600)
+    s, _ = auth.redeem_login_token(db, t, session_ttl_s=60)
+    raw = Path(db.path).read_bytes()
+    assert t.encode() not in raw and s.encode() not in raw
+
+
+def test_logout_invalidates_the_session(db):
+    t = auth.issue_login_token(db, "a@b.com", ttl_s=600)
+    s, _ = auth.redeem_login_token(db, t, session_ttl_s=600)
+    assert auth.resolve_session(db, s)
+    auth.end_session(db, s)
+    assert auth.resolve_session(db, s) is None
+
+
+def test_csrf_token_is_bound_to_the_session():
+    a = auth.csrf_token("session-a", "secret")
+    assert auth.csrf_ok("session-a", "secret", a)
+    assert not auth.csrf_ok("session-b", "secret", a)
+    assert not auth.csrf_ok("session-a", "secret", "")
+
+
+@pytest.mark.parametrize("bad", ["", "nope", "a@b", "a b@c.com", "@x.com", "a@@b.com"])
+def test_bad_addresses_are_refused(bad):
+    with pytest.raises(auth.AuthError):
+        auth.normalise_email(bad)
+
+
+# ------------------------------------------------------- orders, money, ledger
+
+
+@pytest.fixture()
+def customer(db):
+    from flythrough_service.db import new_id, now
+    cid = new_id("cus")
+    with db.tx() as c:
+        c.execute("INSERT INTO customers(id,email,created_at) VALUES(?,?,?)",
+                  (cid, "buyer@example.com", now()))
+    return cid
+
+
+def test_prices_come_from_the_model_not_the_service():
+    """One number, one home. If these ever disagree the customer sees one price
+    on the page and is charged another."""
+    import catalog
+    for s in catalog.CATALOG:
+        assert cat.price_cents(s.id) == round(s.price * 100)
+
+
+def test_price_conversion_rounds_rather_than_truncates():
+    """int(24899.999...) is 24899 -- a cent short on every single order."""
+    assert cat.price_cents("re-listing-pro") == 24900
+    assert cat.price_cents("veh-walkaround-3") == 11700
+
+
+def test_the_portal_never_asks_for_a_photo_link():
+    """It takes the files directly. Asking for a Dropbox link is asking someone
+    to solve a problem we already solved, and it is a field they abandon on."""
+    for v in ("rooms", "vehicles", "products"):
+        assert not [q for q in cat.intake_for(v) if q.startswith("Link to the photos")]
+
+
+def test_a_fresh_order_is_not_ready(db, customer):
+    o = orders.create(db, customer, "re-listing-pro")
+    r = orders.readiness(db, o)
+    assert not r.ok and r.photos == 0 and r.required == 4
+
+
+def test_illegal_transitions_are_refused(db, customer):
+    o = orders.create(db, customer, "re-listing-pro")
+    with db.tx() as c:
+        orders.transition(c, db, o, "awaiting_payment")
+        orders.transition(c, db, o, "paid")
+        with pytest.raises(orders.OrderError):
+            orders.transition(c, db, o, "draft")
+
+
+def test_transitions_are_idempotent(db, customer):
+    """Webhook redelivery must not be an error."""
+    o = orders.create(db, customer, "re-listing-pro")
+    with db.tx() as c:
+        orders.transition(c, db, o, "awaiting_payment")
+        orders.transition(c, db, o, "paid")
+        orders.transition(c, db, o, "paid")
+    assert orders.get(db, o)["status"] == "paid"
+
+
+def test_an_order_is_invisible_to_another_customer(db, customer):
+    """Not found, not forbidden -- a 403 confirms the id exists."""
+    o = orders.create(db, customer, "re-listing-pro")
+    assert orders.get(db, o, customer_id="cus_someone_else") is None
+
+
+# ------------------------------------------------------------------- webhooks
+
+SECRET = "whsec_test"
+
+
+def _event(eid, oid, amount=24900, status="paid",
+           etype="checkout.session.completed"):
+    return {"id": eid, "type": etype, "data": {"object": {
+        "id": "cs_" + eid, "payment_status": status, "amount_total": amount,
+        "client_reference_id": oid, "metadata": {"order_id": oid}}}}
+
+
+def test_a_genuine_signature_verifies():
+    body = b'{"id":"evt_1"}'
+    assert payments.verify(body, payments.sign(body, SECRET), SECRET)["id"] == "evt_1"
+
+
+@pytest.mark.parametrize("header", ["", "garbage", "t=abc,v1=x"])
+def test_malformed_signatures_are_refused(header):
+    with pytest.raises(payments.WebhookError):
+        payments.verify(b"{}", header, SECRET)
+
+
+def test_a_forged_signature_is_refused():
+    body = b'{"id":"evt_1"}'
+    with pytest.raises(payments.WebhookError):
+        payments.verify(body, payments.sign(body, "not-the-secret"), SECRET)
+
+
+def test_an_old_signature_is_refused():
+    """Without a replay window a captured request is valid forever."""
+    body = b'{"id":"evt_1"}'
+    old = payments.sign(body, SECRET, timestamp=int(time.time()) - 99999)
+    with pytest.raises(payments.WebhookError):
+        payments.verify(body, old, SECRET)
+
+
+def test_no_secret_configured_means_no_webhook_is_trusted():
+    body = b"{}"
+    with pytest.raises(payments.WebhookError):
+        payments.verify(body, payments.sign(body, ""), "")
+
+
+def test_payment_marks_paid_exactly_once(db, customer):
+    o = orders.create(db, customer, "re-listing-pro")
+    msg, paid = payments.handle(db, _event("evt_1", o))
+    assert paid == o and orders.get(db, o)["status"] == "paid"
+    msg, paid = payments.handle(db, _event("evt_1", o))
+    assert paid is None and "already processed" in msg
+
+
+def test_an_unpaid_session_is_not_treated_as_paid(db, customer):
+    """An async method still clearing. Shipping on it means delivering before
+    the money settles."""
+    o = orders.create(db, customer, "re-listing-pro")
+    payments.handle(db, _event("evt_1", o, status="unpaid"))
+    assert orders.get(db, o)["status"] == "draft"
+
+
+def test_a_wrong_amount_never_marks_paid(db, customer):
+    """If the charge disagrees with the quote someone has edited a Payment
+    Link, and we would be doing the work for whatever it happened to say."""
+    o = orders.create(db, customer, "re-listing-pro")
+    msg, paid = payments.handle(db, _event("evt_1", o, amount=100))
+    assert paid is None and orders.get(db, o)["status"] == "draft"
+    assert "mismatch" in msg
+
+
+def test_unknown_event_types_are_acknowledged_not_retried(db):
+    """A 500 makes Stripe retry forever on an event that will never succeed."""
+    msg, paid = payments.handle(db, {"id": "evt_x", "type": "invoice.created",
+                                     "data": {"object": {}}})
+    assert paid is None and "ignored" in msg
+
+
+# ------------------------------------------------------------------- reseller
+
+
+def _enrol(db, name="Sam Partner", email="sam@partner.com"):
+    rid = reseller.enrol(db, email, name, rate=0.25)
+    with db.tx() as c:
+        code = c.execute("SELECT code FROM resellers WHERE id=?", (rid,)).fetchone()["code"]
+    return rid, code
+
+
+def test_referral_codes_avoid_ambiguous_characters():
+    """A code read off a business card or spoken down a phone. 0/O and 1/I/L
+    mistyped is a commission that silently goes to nobody."""
+    for _ in range(200):
+        code = reseller.make_code("Olivia Lloyd")
+        assert not (set(code) & set("O0I1L"))
+        assert reseller.CODE_RE.match(code)
+
+
+def test_commission_is_twenty_five_percent_lifetime(db, customer):
+    rid, code = _enrol(db)
+    assert reseller.attribute(db, customer, code)
+    for i, sku in enumerate(["re-listing-pro", "re-listing-pro", "veh-launch"]):
+        o = orders.create(db, customer, sku)
+        payments.handle(db, _event(f"evt_{i}", o, amount=cat.price_cents(sku)))
+    led = reseller.ledger(db, rid, payout_minimum_cents=5000)
+    # 25% of 249 + 249 + 399
+    assert led.lifetime_cents == round(0.25 * (24900 + 24900 + 39900))
+
+
+def test_attribution_is_first_touch_and_permanent(db, customer):
+    """Last-touch would let a second reseller steal an account with one link."""
+    first, code1 = _enrol(db, "First", "one@x.com")
+    second, code2 = _enrol(db, "Second", "two@x.com")
+    assert reseller.attribute(db, customer, code1)
+    assert not reseller.attribute(db, customer, code2)
+    o = orders.create(db, customer, "re-listing-pro")
+    payments.handle(db, _event("evt_1", o))
+    assert reseller.ledger(db, first, payout_minimum_cents=0).lifetime_cents > 0
+    assert reseller.ledger(db, second, payout_minimum_cents=0).lifetime_cents == 0
+
+
+def test_an_unknown_code_attributes_nothing(db, customer):
+    assert not reseller.attribute(db, customer, "NOTACODE")
+    assert not reseller.attribute(db, customer, "")
+
+
+def test_a_commission_is_never_paid_twice(db, customer):
+    rid, code = _enrol(db)
+    reseller.attribute(db, customer, code)
+    o = orders.create(db, customer, "re-listing-pro")
+    for i in range(5):
+        payments.handle(db, _event(f"evt_{i}", o))    # redelivery storm
+    assert reseller.ledger(db, rid, payout_minimum_cents=0).lifetime_cents == 6225
+
+
+def test_a_refund_reverses_the_commission(db, customer):
+    rid, code = _enrol(db)
+    reseller.attribute(db, customer, code)
+    o = orders.create(db, customer, "re-listing-pro")
+    payments.handle(db, _event("evt_1", o))
+    payments.handle(db, {"id": "evt_2", "type": "charge.refunded",
+                         "data": {"object": {"metadata": {"order_id": o}}}})
+    assert reseller.ledger(db, rid, payout_minimum_cents=0).lifetime_cents == 0
+    assert orders.get(db, o)["status"] == "refunded"
+
+
+def test_reversal_keeps_the_row(db, customer):
+    """The ledger records what happened, including what un-happened."""
+    rid, code = _enrol(db)
+    reseller.attribute(db, customer, code)
+    o = orders.create(db, customer, "re-listing-pro")
+    payments.handle(db, _event("evt_1", o))
+    payments.handle(db, {"id": "evt_2", "type": "charge.refunded",
+                         "data": {"object": {"metadata": {"order_id": o}}}})
+    with db.tx() as c:
+        row = c.execute("SELECT status FROM commissions WHERE order_id=?", (o,)).fetchone()
+    assert row["status"] == "reversed"
+
+
+def test_payout_minimum_holds_small_balances(db, customer):
+    rid, code = _enrol(db)
+    reseller.attribute(db, customer, code)
+    o = orders.create(db, customer, "veh-walkaround-3")     # $117 -> $29.25
+    payments.handle(db, _event("evt_1", o, amount=11700))
+    led = reseller.ledger(db, rid, payout_minimum_cents=5000)
+    assert led.payable_cents == 0 and led.accrued_cents == 2925
+
+
+def test_duplicate_enrolment_is_refused(db):
+    _enrol(db)
+    with pytest.raises(reseller.ResellerError):
+        _enrol(db)
+
+
+# ---------------------------------------------------------------- render queue
+
+
+def _paid_order(db, sku="re-listing-pro",
+                names=("01_front-elevation.jpg", "02_foyer.jpg", "03_kitchen.jpg",
+                       "04_patio.jpg", "05_rear-aerial.jpg"), tmp=None):
+    from flythrough_service.db import new_id, now
+    cid = new_id("cus")
+    with db.tx() as c:
+        c.execute("INSERT INTO customers(id,email,created_at) VALUES(?,?,?)",
+                  (cid, f"{new_id('e')}@x.com", now()))
+    o = orders.create(db, cid, sku)
+    src = (tmp or Path(db.path).parent) / "src"
+    src.mkdir(parents=True, exist_ok=True)
+    with db.tx() as c:
+        for i, nm in enumerate(names, 1):
+            f = src / nm
+            f.write_bytes(JPEG)
+            c.execute("INSERT INTO uploads(id,order_id,filename,mime,bytes,sha256,"
+                      "path,position,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                      (new_id("upl"), o, nm, "image/jpeg", len(JPEG),
+                       f"h{i}", str(f), i, now()))
+        orders.transition(c, db, o, "awaiting_payment")
+        orders.transition(c, db, o, "paid")
+    return o
+
+
+def _ok_renderer(*, out_dir, slug, **kw):
+    m = Path(out_dir) / f"{slug}_master.mp4"
+    m.write_bytes(b"video")
+    return [("master", m)]
+
+
+def test_a_paid_order_renders_and_delivers(db, tmp_path):
+    o = _paid_order(db, tmp=tmp_path)
+    w = q.Worker(db=db, data_dir=tmp_path, renderer=_ok_renderer)
+    w.enqueue(o)
+    w.run_one()
+    assert orders.get(db, o)["status"] == "delivered"
+    assert [d["kind"] for d in orders.deliverables(db, o)] == ["master"]
+
+
+def test_one_render_per_order_ever(db, tmp_path):
+    """Enqueueing twice must not spend the credits twice."""
+    o = _paid_order(db, tmp=tmp_path)
+    w = q.Worker(db=db, data_dir=tmp_path, renderer=_ok_renderer)
+    assert w.enqueue(o) == w.enqueue(o) == w.enqueue(o)
+
+
+def test_only_one_worker_claims_a_job(db, tmp_path):
+    """The status guard on the UPDATE is the entire concurrency design. If two
+    workers can claim one job, one order renders twice and bills twice."""
+    import threading
+    o = _paid_order(db, tmp=tmp_path)
+    w = q.Worker(db=db, data_dir=tmp_path, renderer=_ok_renderer)
+    w.enqueue(o)
+    got = []
+    threads = [threading.Thread(target=lambda: got.append(w.claim()))
+               for _ in range(12)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sum(1 for g in got if g) == 1
+
+
+def test_a_failing_render_retries_then_gives_up(db, tmp_path):
+    def boom(**kw):
+        raise RuntimeError("provider exploded")
+    o = _paid_order(db, tmp=tmp_path)
+    w = q.Worker(db=db, data_dir=tmp_path, renderer=boom)
+    w.enqueue(o)
+    for _ in range(q.MAX_ATTEMPTS + 1):
+        w.run_one()
+    assert w.stats().get("failed") == 1
+    assert orders.get(db, o)["status"] == "failed"
+
+
+def test_a_failed_order_is_not_auto_refunded(db, tmp_path):
+    """A human decides re-cut or refund. Auto-refunding hides the failure and
+    loses the chance to fix a job the customer still wants."""
+    def boom(**kw):
+        raise RuntimeError("nope")
+    o = _paid_order(db, tmp=tmp_path)
+    w = q.Worker(db=db, data_dir=tmp_path, renderer=boom)
+    w.enqueue(o)
+    for _ in range(q.MAX_ATTEMPTS + 1):
+        w.run_one()
+    assert orders.get(db, o)["status"] != "refunded"
+
+
+def test_an_empty_queue_is_not_an_error(db, tmp_path):
+    assert q.Worker(db=db, data_dir=tmp_path, renderer=_ok_renderer).run_one() is None
+
+
+# ------------------------------------------------------------------- viewpoint
+
+
+def test_the_different_house_pairing_is_caught():
+    """The real failure from this project: a rear-framed patio shot cut to a
+    front-framed aerial. The model has to cross the building and lands on what
+    looks like another property."""
+    p = render.prepare("rooms", [
+        {"filename": "01_patio.jpg", "path": "/x", "room_key": "", "position": 1},
+        {"filename": "02_drone-overhead.jpg", "path": "/x", "room_key": "", "position": 2}])
+    assert p.warnings
+
+
+def test_a_correctly_named_aerial_does_not_warn():
+    """A check that fires on correct work trains people to ignore it."""
+    p = render.prepare("rooms", [
+        {"filename": "01_patio.jpg", "path": "/x", "room_key": "", "position": 1},
+        {"filename": "02_rear-aerial.jpg", "path": "/x", "room_key": "", "position": 2}])
+    assert not p.warnings
+
+
+def test_real_estate_cannot_be_rendered_without_disclosure():
+    assert render.placement_for("rooms") != "none"
+    assert render.placement_for("vehicles") == "none"
+
+
+def test_slugs_are_safe_and_unique_per_order():
+    a = render.slug_for("ord_aaaaaaaaaaaa", {"Property address (as it appears on the listing)": "1420 Cedar Ridge Rd, Austin TX"})
+    b = render.slug_for("ord_bbbbbbbbbbbb", {"Property address (as it appears on the listing)": "1420 Cedar Ridge Rd, Austin TX"})
+    assert a != b
+    assert all(ch.isalnum() or ch == "-" for ch in a)
+    assert render.slug_for("ord_cccccccccccc", {}).startswith("job-")
+
+
+def test_staging_copies_and_never_mutates_the_original(db, tmp_path):
+    src = tmp_path / "blob"
+    src.write_bytes(JPEG)
+    photos = [{"path": str(src), "key": "kitchen", "position": 1,
+               "filename": "kitchen.jpg"}]
+    out = render.stage_originals(tmp_path, "ord_x", photos)
+    staged = list(out.iterdir())
+    assert len(staged) == 1 and staged[0].name == "01_kitchen.jpg"
+    assert staged[0].read_bytes() == src.read_bytes()
+    assert src.exists()          # copied, not moved

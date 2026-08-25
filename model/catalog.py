@@ -65,6 +65,21 @@ INTAKE = {
 }
 
 
+# Questions that exist ONLY because the email flow has no upload. The self-serve
+# portal takes the files directly, so asking for a Dropbox link there is asking
+# someone to solve a problem we already solved for them -- and a field they
+# cannot sensibly fill is a field they abandon on.
+PHOTO_LINK_QUESTIONS = frozenset(
+    q for qs in INTAKE.values() for q in qs if q.startswith("Link to the photos"))
+
+
+def intake(vertical: str, *, uploads_inline: bool = False) -> list[str]:
+    qs = INTAKE[vertical]
+    if uploads_inline:
+        qs = [q for q in qs if q not in PHOTO_LINK_QUESTIONS]
+    return list(qs)
+
+
 @dataclass(frozen=True)
 class Sku:
     id: str
