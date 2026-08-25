@@ -529,7 +529,7 @@ def build() -> Path:
 
     <p style="margin-top:32px">Most AI video ships you a file and a liability. Every delivery of ours arrives with the disclosure card burned into the video, a QR code, ready-to-paste MLS remark text, and a hosted page carrying your unaltered originals — which is the artefact the statute actually asks for.</p>
     <p><strong>We never retouch, stage or colour-correct what you send.</strong> Not a limitation — the moment we edit a photo, that originals page stops containing originals, and the position collapses for both of us.</p>
-    <p style="color:var(--faint);font-size:.9rem">Not legal advice. Rules vary by MLS and state. Have your broker's counsel review the disclosure text.</p>
+    <p style="color:var(--faint);font-size:.9rem">Not legal advice. Rules vary by MLS and state. Have your broker's counsel review the disclosure text. We wrote up <a href="/writing/ab-723-what-it-actually-requires/">what AB 723 actually requires</a> — including the ordinary photo editing it explicitly does <em>not</em> cover.</p>
 
     <div class="stats">
       <div class="stat"><div class="n">85%</div><div class="l">of buyers watch video</div></div>
@@ -571,7 +571,7 @@ def build() -> Path:
 <footer>
   <div class="wrap foot">
     <span>{d['brand']} · {d['domain']}</span>
-    <span class="mono"><a href="/terms/">Terms</a> · <a href="/privacy/">Privacy</a> · <a href="/refunds/">Refunds</a> · <a href="/shot-guide/">Shot guides</a></span>
+    <span class="mono"><a href="/writing/">Writing</a> · <a href="/shot-guide/">Shot guides</a> · <a href="/terms/">Terms</a> · <a href="/privacy/">Privacy</a> · <a href="/refunds/">Refunds</a></span>
     <span class="mono">Anchored AI video · every shot begins and ends on a real photograph</span>
   </div>
 </footer>

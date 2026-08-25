@@ -33,6 +33,7 @@ STEPS = [
     ("shot guide pages", [sys.executable, str(HERE / "build_guides.py")]),
     ("post-checkout intake", [sys.executable, str(HERE / "build_start.py")]),
     ("legal pages", [sys.executable, str(HERE / "build_legal.py")]),
+    ("articles", [sys.executable, str(HERE / "build_articles.py")]),
 ]
 
 # src too, not just href: the full-length films are referenced only by <source>,

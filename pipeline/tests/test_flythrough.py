@@ -1185,3 +1185,73 @@ def test_the_switch_tool_flags_a_sku_that_would_sell_below_cost():
     underwater = [s.id for s in catalog.CATALOG
                   if ps.margin_at(s, absurd)["gp"] <= 0]
     assert underwater, "a $2/sec rate should sink the volume plans"
+
+
+# ------------------------------------------------------------------ writing
+
+
+def _articles():
+    root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(root / "site"))
+    import importlib
+    ba = importlib.import_module("build_articles")
+    return ba, sorted((root / "site" / "articles").glob("*.md"))
+
+
+def test_every_article_has_complete_front_matter():
+    ba, files = _articles()
+    assert files, "no articles found"
+    for f in files:
+        meta = ba.parse(f)
+        assert meta["title"] and meta["slug"] and meta["description"]
+        assert meta["slug"] == f.stem, f"{f.name}: slug must match the filename"
+
+
+def test_a_legal_article_carries_its_disclaimer_and_a_primary_source():
+    """These are read by people deciding what to publish on a listing. An
+    article that states a statute without saying it is not legal advice, or
+    without pointing at the text itself, is worse than not writing one."""
+    ba, files = _articles()
+    for f in files:
+        meta = ba.parse(f)
+        body = meta["body"].lower()
+        mentions_law = any(w in body for w in
+                           ("statute", "ab 723", "§10140.8", "code of ethics"))
+        if not mentions_law:
+            continue
+        assert "not legal advice" in body, f"{f.name}: no disclaimer"
+        assert "leginfo.legislature.ca.gov" in meta["body"] or "nar.realtor" in body, (
+            f"{f.name}: cites no primary source")
+
+
+def test_articles_do_not_quote_a_price():
+    """Prices belong to the model and change. An article that hardcodes one
+    goes stale silently and is the last place anyone thinks to look."""
+    import re
+    ba, files = _articles()
+    allowed = {"$500", "$5,000"}          # the cited MLS fine range
+    for f in files:
+        found = set(re.findall(r"\$[\d,]+", ba.parse(f)["body"])) - allowed
+        assert not found, f"{f.name} quotes {sorted(found)}"
+
+
+def test_the_writing_index_lists_every_article():
+    root = Path(__file__).resolve().parents[2]
+    index = root / "site" / "dist" / "writing" / "index.html"
+    if not index.is_file():
+        pytest.skip("dist/ not built")
+    ba, files = _articles()
+    html = index.read_text()
+    for f in files:
+        assert ba.parse(f)["slug"] in html, f"{f.name} missing from the index"
+
+
+def test_articles_declare_a_canonical_url():
+    """Both domains serve the same site. Without a canonical, the short domain
+    used for QR codes competes with the real one in search."""
+    root = Path(__file__).resolve().parents[2]
+    d = root / "site" / "dist" / "writing"
+    if not d.is_dir():
+        pytest.skip("dist/ not built")
+    for page in d.rglob("index.html"):
+        assert 'rel="canonical"' in page.read_text(), page

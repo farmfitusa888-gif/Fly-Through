@@ -44,7 +44,7 @@ partner signed.**
       pre-payment — `/shoot/<id>` does it at the moment of capture
 - [x] Originals page auto-publishes on delivery
 - [x] Write the operator SOP so a contractor can run step 7 — `11-operator-sop.md`
-- [ ] Publish the first compliance-led content piece
+- [x] Publish the first compliance-led content piece — `/writing/`
 
 **Exit test: $5,000/mo with <20 operator hours, and one full job run
 start-to-finish by someone who is not the founder.**
@@ -110,7 +110,7 @@ fails. The pipeline is already good enough to sell. Go sell it.
 
 Written after the build, so the roadmap and the repository agree.
 
-**Done and tested (367 tests):**
+**Done and tested (387 tests):**
 
 - The renderer, all three verticals, anchored end to end
 - Compliance as a pipeline stage: real estate cannot opt out of disclosure, and
@@ -129,6 +129,9 @@ Written after the build, so the roadmap and the repository agree.
   items 1 and 2, built early because both compound and neither needs volume to
   start working
 - The operator SOP (`11-operator-sop.md`)
+- Provider-agnostic costing, and a switch tool that answers what a provider
+  change does to every price rather than only what it costs per second
+- The first compliance-led article, at `/writing/`
 
 **Blocked on assets, not on code:**
 
