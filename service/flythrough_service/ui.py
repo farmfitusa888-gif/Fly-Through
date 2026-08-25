@@ -84,6 +84,19 @@ td.k{color:var(--paper)}
 .stat .l{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:.64rem;
   letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-top:8px}
 .note{color:var(--faint);font-size:.88rem}
+/* The render sheet's set-this-before-you-render block. Loud on purpose: it is
+   the difference between a shot rendered at the provider's 5s default and one
+   rendered at the length the customer paid for. */
+.card.warn{border-left:2px solid var(--ember)}
+.setme{display:flex;align-items:baseline;gap:12px;margin:10px 0 14px}
+.setme .big{font-size:1.9rem}
+.setme .l{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:.64rem;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+table.fields{margin:0 0 16px}
+table.fields td{padding:7px 12px 7px 0;border-bottom:1px solid var(--rule);
+  font-size:.86rem}
+table.fields td:first-child{width:12rem;color:var(--faint)}
+table.fields strong{color:var(--ember);font-weight:500}
 ul.plain{list-style:none;padding:0;margin:0 0 18px}
 ul.plain li{padding:9px 0;border-bottom:1px solid var(--rule);color:var(--dim);
   display:flex;justify-content:space-between;gap:14px;font-size:.93rem}

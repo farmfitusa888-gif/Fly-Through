@@ -355,6 +355,17 @@ def test_an_operator_can_read_the_queue(app_with_operator):
     assert c.get("/admin/queue").status_code == 200
 
 
+def test_the_queue_carries_the_turnaround_number(app_with_operator):
+    """The provider-switch trigger has to be on a page the operator already
+    opens every day. A number in a doc nobody re-reads is an intention."""
+    c = TestClient(app_with_operator)
+    sign_in(c, app_with_operator, "boss@flythrough.test")
+    page = c.get("/admin/queue").text
+    assert "Turnaround" in page
+    assert "Median paid" in page
+    assert "own turnaround promise" in page
+
+
 def test_a_signed_out_visitor_gets_404_not_a_redirect(app_with_operator):
     """404, not 403 or a login redirect: both of those confirm an operator
     console exists at this path and is worth attacking."""
@@ -1106,6 +1117,65 @@ def _ready_paid_order(client, app, sku="re-listing-pro"):
         "csrf": csrf})
     _pay(client, oid)
     return oid
+
+
+def test_the_sheet_names_the_length_before_the_prompts(client, app):
+    """The gate on upload catches a short render after the credits are gone.
+    This is the same check moved in front of the operator: the provider's
+    duration field defaults to 5 seconds and its resolution to 720p, neither is
+    flagged when you submit, and working down the sheet on those defaults is how
+    a 24-second order comes back as 8."""
+    oid = _ready_paid_order(client, app)
+    page = client.get(f"/admin/order/{oid}").text
+    assert "Set the length on every shot" in page
+
+    # The block has to come before the first prompt, or it is not in front of
+    # anything -- an operator reads down.
+    assert page.index("Set the length on every shot") < page.index("Shot 1")
+
+    from flythrough_service import manual
+    brief = manual.build(app.state.db, app.state.settings.data_dir, oid)
+    for sh in brief.shots:
+        assert f"#{sh['n']} <strong>{sh['seconds']}s</strong>" in page
+    assert "defaults to 5" in page
+    assert "720p" in page, "the resolution default has to be called out too"
+
+
+def test_the_plain_text_sheet_names_the_length_too(client, app):
+    """The operator works from this one on a second screen. It cannot be the
+    version that leaves the duration out."""
+    oid = _ready_paid_order(client, app)
+    sheet = client.get(f"/admin/order/{oid}/sheet.txt").text
+    from flythrough_service import manual
+    brief = manual.build(app.state.db, app.state.settings.data_dir, oid)
+    for sh in brief.shots:
+        assert f"duration = {sh['seconds']}" in sheet
+    assert "resolution = 1080p" in sheet
+    assert "SET THE LENGTH ON EVERY SHOT" in sheet
+
+
+def test_the_sheet_reads_the_defaults_from_the_recorded_schema(client, app):
+    """Not from a number typed into the page. If the provider changes its
+    default, re-recording the schema has to be the only edit -- a hardcoded 5
+    would go on reassuring the operator after it stopped being true."""
+    from flythrough import providers
+    profile = providers.load("wan2-7", "image2video")
+    assert profile["fields"]["duration"]["default"] == 5
+    assert profile["fields"]["resolution"]["default"] == "720p"
+
+    oid = _ready_paid_order(client, app)
+    from flythrough_service import manual
+    brief = manual.build(app.state.db, app.state.settings.data_dir, oid)
+    by_field = {f["field"]: f for f in brief.shots[0]["settings"]}
+    assert by_field["resolution"]["value"] == "1080p"
+    assert by_field["resolution"]["differs"] is True, "720p -> 1080p is a change"
+    assert by_field["videoCount"]["differs"] is False, (
+        "a field the form already defaults right must not be flagged")
+    assert brief.duration_min == 2 and brief.duration_max == 15
+
+    # A shot that happens to be 5s needs no warning; one that is not, does.
+    assert not manual._settings(profile, 5, "720p")[0]["differs"]
+    assert manual._settings(profile, 6, "720p")[0]["differs"]
 
 
 def test_the_render_sheet_carries_the_plan_and_the_cost(client, app):

@@ -831,3 +831,95 @@ def test_a_payout_is_recorded_in_the_audit_log(db, customer):
         row = c.execute("SELECT detail FROM events WHERE kind='commission.paid'"
                         " AND subject=?", (rid,)).fetchone()
     assert row and "BACS 12345" in row["detail"]
+
+
+# ---------------------------------------------------------------- turnaround
+def _order(db, customer, sku, *, paid=None, delivered=None, status="delivered"):
+    from flythrough_service import orders
+    oid = orders.create(db, customer, sku)
+    with db.tx() as c:
+        c.execute("UPDATE orders SET status=?, paid_at=?, delivered_at=?"
+                  " WHERE id=?", (status, paid, delivered, oid))
+    return oid
+
+
+def test_turnaround_judges_each_order_against_its_own_promise(db, customer):
+    """Not against a number picked for a dashboard. Every SKU carries a
+    turnaround line because it is the sentence next to the money, and a 48-hour
+    SKU delivered in 30 is on time while a 24-hour one delivered in 30 is not."""
+    from flythrough_service import turnaround
+    t0 = 1_700_000_000
+    _order(db, customer, "re-listing-pro", paid=t0, delivered=t0 + 30 * 3600)
+    _order(db, customer, "veh-launch", paid=t0, delivered=t0 + 30 * 3600)
+    r = turnaround.measure(db, at=t0 + 40 * 3600)
+    assert r.delivered == 2 and r.on_time == 1
+    assert r.median_hours == 30.0
+
+
+def test_a_weekly_batch_sku_is_not_late_at_hour_25(db, customer):
+    """lot-25 was sold as a weekly batch. Judging it against 24 hours would
+    report a bottleneck that does not exist and trigger a purchase decision on
+    a promise nobody made."""
+    from flythrough_service import turnaround
+    t0 = 1_700_000_000
+    _order(db, customer, "lot-25", paid=t0, delivered=t0 + 48 * 3600)
+    assert turnaround.measure(db, at=t0 + 60 * 3600).on_time == 1
+
+
+def test_turnaround_says_nothing_until_the_sample_is_big_enough(db, customer):
+    """Three orders cannot tell you whether to buy a renderer. The page has to
+    say so rather than print a confident 67%."""
+    from flythrough_service import turnaround
+    t0 = 1_700_000_000
+    for i in range(3):
+        _order(db, customer, "re-listing-pro", paid=t0, delivered=t0 + 40 * 3600)
+    r = turnaround.measure(db, at=t0)
+    assert not r.enough and not r.pressured
+    assert "needed before the rate means anything" in r.headline
+
+
+def test_a_sustained_miss_rate_trips_the_provider_switch_trigger(db, customer):
+    """This is the whole reason the metric exists. business/12-render-provider.md
+    says to buy an automatic renderer when the operator becomes the reason a
+    delivery is late; the queue page is where that stops being a judgement."""
+    from flythrough_service import turnaround
+    t0 = 1_700_000_000
+    for i in range(8):
+        late = i < 3
+        _order(db, customer, "re-listing-pro", paid=t0,
+               delivered=t0 + (40 if late else 10) * 3600)
+    r = turnaround.measure(db, at=t0)
+    assert r.enough and r.pressured
+    assert "12-render-provider" in r.headline
+
+    # And the same volume delivered on time must not trip it.
+    db2 = Database(Path(db.path).parent / "ok.db")
+    with db2.tx() as c:
+        c.execute("INSERT INTO customers(id,email,created_at) VALUES(?,?,?)",
+                  ("cus_x", "b@example.com", t0))
+    for i in range(8):
+        _order(db2, "cus_x", "re-listing-pro", paid=t0, delivered=t0 + 10 * 3600)
+    assert not turnaround.measure(db2, at=t0).pressured
+
+
+def test_an_order_still_waiting_is_counted_as_overdue_not_delivered(db, customer):
+    """An order that has blown its promise and is still sitting there is the
+    one that matters most, and it has no delivered_at to be measured by."""
+    from flythrough_service import turnaround
+    t0 = 1_700_000_000
+    _order(db, customer, "re-listing-pro", paid=t0, delivered=None,
+           status="rendering")
+    r = turnaround.measure(db, at=t0 + 30 * 3600)
+    assert r.delivered == 0
+    assert r.waiting == 1 and r.overdue_now == 1
+    assert round(r.oldest_waiting_hours) == 30
+
+
+def test_a_refunded_order_is_not_counted_as_waiting_forever(db, customer):
+    """It was paid and never delivered, which is exactly the shape of a stuck
+    order. Left in, every refund would permanently inflate the backlog."""
+    from flythrough_service import turnaround
+    t0 = 1_700_000_000
+    _order(db, customer, "re-listing-pro", paid=t0, delivered=None,
+           status="refunded")
+    assert turnaround.measure(db, at=t0 + 99 * 3600).waiting == 0

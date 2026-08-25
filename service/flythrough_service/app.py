@@ -33,11 +33,11 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response, FileResp
 from starlette.concurrency import run_in_threadpool
 
 from . import (auth, catalog_bridge as cat, limits, manual, notify, orders,
-               outcomes, payments, render, reseller)
+               outcomes, payments, render, reseller, turnaround)
 from .config import Settings, load
 from .db import Database, new_id, now
 from .mail import Mailer
-from .queue import Worker
+from .queue import SHORT_DELIVERY, Worker
 from .storage import Store, UploadRejected
 from .ui import esc, flash, money, page, status_pill
 
@@ -1005,15 +1005,61 @@ def create_app(settings: Settings | None = None, *, renderer=None,
                                f'<p><a href="/admin/queue">Back to the queue</a></p>',
                                narrow=True)
         o = orders.get(db, order_id)
+        def settings_rows(sh):
+            """Field name, the value to set, and where the form disagrees.
+
+            Read from the provider's own recorded schema, so these are the
+            actual defaults the operator is typing over rather than what the
+            defaults were the day this page was written.
+            """
+            return "".join(
+                f'<tr><td class="mono">{esc(f["field"])}</td>'
+                f'<td class="mono"><strong>{esc(f["value"])}</strong></td>'
+                f'<td class="note">'
+                + (f'form defaults to {esc(f["default"])}' if f["differs"]
+                   else '&mdash;')
+                + '</td></tr>' for f in sh["settings"])
+
         shots = "".join(
             f'<div class="card plain"><h3>Shot {sh["n"]} &middot; '
             f'{esc(sh["from"])} &rarr; {esc(sh["to"])}</h3>'
-            f'<p class="mono">{esc(sh["move"])} &middot; {sh["seconds"]}s</p>'
-            f'<p class="mono">start &nbsp;{esc(sh["start_frame"])}<br>'
+            f'<p class="mono">{esc(sh["move"])}</p>'
+            f'<div class="setme"><div class="big">{sh["seconds"]}s</div>'
+            f'<div class="l">{esc(brief.duration_field)} &middot; '
+            f'{sh["credits"]} credits &middot; '
+            f'{esc("$%.2f" % sh["usd"])}</div></div>'
+            + (f'<table class="fields"><tbody>{settings_rows(sh)}</tbody>'
+               f'</table>' if sh["settings"] else "")
+            + f'<p class="mono">start &nbsp;{esc(sh["start_frame"])}<br>'
             f'end &nbsp;&nbsp;&nbsp;{esc(sh["end_frame"])}</p>'
             f'<p><strong>Prompt</strong><br>{esc(sh["prompt"])}</p>'
             f'<p class="note"><strong>Negative</strong><br>'
             f'{esc(sh["negative_prompt"])}</p></div>' for sh in brief.shots)
+
+        # Before the prompts, not after them. The failure this prevents is an
+        # operator working down the sheet on the provider's defaults: wan2-7
+        # defaults duration to 5s and resolution to 720p, says nothing, bills
+        # normally, and the short clips are only caught by the delivery gate --
+        # by which point the credits are gone.
+        lengths = " &middot; ".join(
+            f'<span class="mono">#{sh["n"]} <strong>{sh["seconds"]}s</strong>'
+            f'</span>' for sh in brief.shots)
+        setup = (
+            f'<div class="card warn"><h3>Set the length on every shot</h3>'
+            f'<p>{lengths}</p>'
+            f'<p>Total <strong>{brief.total_seconds}s</strong> across '
+            f'{len(brief.shots)} shots, on '
+            f'<span class="mono">{esc(brief.model)}</span> at '
+            f'<span class="mono">{esc(brief.tier)}</span>.</p>'
+            + (f'<p class="note">The provider\'s '
+               f'<span class="mono">{esc(brief.duration_field)}</span> field '
+               f'takes a whole number of seconds, {brief.duration_min}&ndash;'
+               f'{brief.duration_max}, and defaults to 5. It will not tell you '
+               f'that is wrong.</p>' if brief.duration_max else "")
+            + f'<p class="note">A delivery that comes back under '
+              f'{int(SHORT_DELIVERY * 100)}% of {brief.total_seconds}s is '
+              f'refused on upload, so a shot rendered at the default is '
+              f'credits spent for nothing.</p></div>')
 
         blocked = ("".join(f'<li><span>{esc(b)}</span></li>' for b in brief.blocks))
         warn = ("".join(f'<li><span>{esc(w)}</span></li>' for w in brief.warnings))
@@ -1036,6 +1082,7 @@ def create_app(settings: Settings | None = None, *, renderer=None,
             f'<div class="l">Cost (est.)</div></div></div>'
             + (f'<div class="card"><h3>Check before rendering</h3>'
                f'<ul class="plain">{warn}</ul></div>' if warn else "")
+            + setup
             + f'<div class="card"><h3>Originals</h3>'
               f'<p class="mono">{esc(brief.originals_dir)}</p>'
               f'<p class="note">Upload these to the provider first. The anchor '
@@ -1148,10 +1195,34 @@ def create_app(settings: Settings | None = None, *, renderer=None,
             f'</td></tr>' for j in jobs)
         summ = outcomes.summary(db)
         pending = len(outcomes.due(db))
+        # The provider-switch trigger, as a number rather than an intention.
+        # business/12-render-provider.md says to buy an automatic renderer when
+        # the operator becomes the reason a delivery is late; this is where that
+        # stops being a judgement call.
+        ta = turnaround.measure(db)
+        late = (f'<div class="stat"><div class="big">{ta.overdue_now}</div>'
+                f'<div class="l">Overdue now</div></div>' if ta.waiting else "")
+        turn = (f'<h2>Turnaround</h2>'
+                f'<p class="lede">{esc(ta.headline)}</p>'
+                f'<div class="grid">'
+                f'<div class="stat"><div class="big">'
+                f'{esc("%.1fh" % ta.median_hours)}</div>'
+                f'<div class="l">Median paid &rarr; delivered</div></div>'
+                f'<div class="stat"><div class="big">'
+                f'{esc("%.1fh" % ta.slowest_hours)}</div>'
+                f'<div class="l">Slowest of {ta.delivered}</div></div>'
+                f'<div class="stat"><div class="big">{ta.waiting}</div>'
+                f'<div class="l">Waiting'
+                + (f' &middot; oldest {ta.oldest_waiting_hours:.0f}h'
+                   if ta.waiting else "")
+                + f'</div></div>{late}</div>'
+                f'<p class="note">Measured against each SKU\'s own turnaround '
+                f'promise, the one next to the money in the catalogue.</p>')
         body = (f'<h1>Queue</h1><p class="lede">{esc(worker.stats())}</p>'
                 f'<table><tr><th>Order</th><th>SKU</th><th>Job</th>'
                 f'<th>Tries</th><th>Error</th><th></th></tr>{rows}</table>'
-                f'<h2>Outcomes</h2>'
+                + turn
+                + f'<h2>Outcomes</h2>'
                 f'<div class="grid">'
                 f'<div class="stat"><div class="big">{summ["answered"]}</div>'
                 f'<div class="l">Answered</div></div>'

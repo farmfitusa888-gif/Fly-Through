@@ -27,7 +27,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "pipeline") not in sys.path:
     sys.path.insert(0, str(ROOT / "pipeline"))
 
-from flythrough.cost import quote                      # noqa: E402
+from flythrough import providers                       # noqa: E402
+from flythrough.cost import USD_PER_CREDIT, quote, rate  # noqa: E402
 from flythrough.planner import build_plan              # noqa: E402
 
 from . import orders, render                            # noqa: E402
@@ -46,6 +47,39 @@ class Brief:
     credits: int
     usd: float
     originals_dir: Path
+    model: str = "wan2-7"
+    tier: str = "1080p"
+    # Field name the provider gives the shot length, and the range it accepts.
+    # Read from the recorded schema so the sheet cannot drift from the form the
+    # operator is actually typing into.
+    duration_field: str = "duration"
+    duration_min: int = 0
+    duration_max: int = 0
+
+
+def _settings(profile: dict, seconds: int, tier: str) -> list[dict]:
+    """The fields the operator has to set by hand, and what they default to.
+
+    This is the whole point of putting the sheet in front of the render rather
+    than after it. wan2-7 defaults `duration` to 5 and `resolution` to 720p.
+    Both are wrong for a 6-second 1080p shot, neither is flagged by the
+    provider, and the operator finds out when the clips come back short and the
+    delivery gate refuses them -- after the credits are gone.
+    """
+    if not profile:
+        return []
+    fields = profile.get("fields", {})
+    want = {"duration": seconds, "resolution": tier,
+            "enablePromptExpansion": False, "videoCount": 1}
+    out = []
+    for key, value in want.items():
+        spec = fields.get(key)
+        if spec is None:
+            continue
+        default = spec.get("default")
+        out.append({"field": key, "value": value, "default": default,
+                    "differs": default is not None and default != value})
+    return out
 
 
 class NotReady(Exception):
@@ -86,23 +120,37 @@ def build(db, data_dir: Path, order_id: str, *, model: str = "wan2-7",
     q = quote(seconds=plan.total_seconds, shots=len(plan.shots),
               model=model, tier=tier)
 
+    try:
+        profile = providers.load(model, "image2video")
+    except FileNotFoundError:
+        # A model we have not recorded a schema for still gets a sheet. It just
+        # cannot tell the operator which fields the provider will default wrong.
+        profile = {}
+    cps = rate(model, tier)
+
     shots = [{
         "n": s.index + 1,
         "from": s.from_room, "to": s.to_room,
         "move": s.move_label,
         "seconds": s.seconds,
+        "credits": cps * s.seconds,
+        "usd": cps * s.seconds * USD_PER_CREDIT,
+        "settings": _settings(profile, s.seconds, tier),
         "start_frame": Path(s.start_frame).name,
         "end_frame": Path(s.end_frame).name,
         "prompt": s.prompt,
         "negative_prompt": s.negative_prompt,
     } for s in plan.shots]
 
+    dur = (profile.get("fields", {}) or {}).get("duration", {})
     return Brief(
         order_id=order_id, listing=listing, style=style, shots=shots,
         warnings=tuple(plan.warnings) + prep.warnings, blocks=prep.blocks,
         total_seconds=plan.total_seconds,
         credits=q.expected_credits, usd=q.expected_usd,
-        originals_dir=originals)
+        originals_dir=originals, model=model, tier=tier,
+        duration_min=int(dur.get("minimum", 0)),
+        duration_max=int(dur.get("maximum", 0)))
 
 
 def _style(vertical: str, answers: dict) -> str:
@@ -122,6 +170,15 @@ def as_text(brief: Brief) -> str:
         f"{brief.listing}   style: {brief.style}",
         f"{len(brief.shots)} shots / {brief.total_seconds}s",
         f"~{brief.credits} credits  (~${brief.usd:.2f})",
+        f"model {brief.model} @ {brief.tier}",
+        "",
+        "SET THE LENGTH ON EVERY SHOT. " + ", ".join(
+            f"#{s['n']}={s['seconds']}s" for s in brief.shots)
+        + f"  ->  {brief.total_seconds}s in total.",
+        f"The provider's {brief.duration_field} field defaults to 5 and will not"
+        " tell you it is wrong.",
+        "A delivery that comes back under 75% of the runtime above is refused,",
+        "so a shot rendered at the default is credits spent for nothing.",
         "",
         f"Originals staged at: {brief.originals_dir}",
         "Upload those to OpenArt first -- the frame URLs must be the",
@@ -135,8 +192,19 @@ def as_text(brief: Brief) -> str:
         out += ["Warnings:"] + [f"  - {w}" for w in brief.warnings] + [""]
     for s in brief.shots:
         out += [
-            f"--- shot {s['n']}  {s['from']} -> {s['to']}  "
-            f"({s['move']}, {s['seconds']}s)",
+            f"--- shot {s['n']}  {s['from']} -> {s['to']}  ({s['move']})",
+            f"  >> {brief.duration_field} = {s['seconds']}"
+            + (f"   (accepts {brief.duration_min}-{brief.duration_max}"
+               if brief.duration_max else "")
+            + f", {s['credits']} credits, ${s['usd']:.2f})",
+        ]
+        for f in s["settings"]:
+            if f["field"] == brief.duration_field:
+                continue
+            out.append(f"  >> {f['field']} = {f['value']}"
+                       + (f"   (the form defaults to {f['default']})"
+                          if f["differs"] else ""))
+        out += [
             f"startFrame : {s['start_frame']}",
             f"endFrame   : {s['end_frame']}",
             f"prompt     : {s['prompt']}",
