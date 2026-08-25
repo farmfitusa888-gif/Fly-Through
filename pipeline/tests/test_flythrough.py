@@ -1057,3 +1057,55 @@ def test_disclosure_page_is_not_published_without_its_originals():
         for ref in set(re.findall(r'src="(originals/[^"]+)"', html)):
             assert (page.parent / ref).is_file(), (
                 f"{page.parent.name} published with a missing original: {ref}")
+
+
+def test_buy_button_prefers_the_upload_first_flow():
+    """Precedence is not cosmetic. The service checks a customer's photographs
+    BEFORE charging them; a Payment Link takes the money and finds out after.
+    So route to the app whenever it is live, fall back to a link, and to email
+    last -- never to a dead button."""
+    import importlib
+    import json as _json
+    root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(root / "site"))
+    bl = importlib.import_module("build_landing")
+
+    saved_links = dict(bl.LINKS)
+    saved_cfg = dict(bl.CONFIG)
+    try:
+        bl.LINKS.clear()
+        bl.CONFIG["service_url"] = ""
+        assert "mailto:" in bl.buy("re-listing-pro")
+
+        bl.LINKS["re-listing-pro"] = "https://buy.stripe.com/x"
+        assert "buy.stripe.com" in bl.buy("re-listing-pro")
+
+        bl.CONFIG["service_url"] = "https://app.example.com/"
+        html = bl.buy("re-listing-pro")
+        assert "app.example.com/order?sku=re-listing-pro" in html
+        assert "buy.stripe.com" not in html, "a live app must win over a link"
+        assert 'href=""' not in html
+    finally:
+        bl.LINKS.clear()
+        bl.LINKS.update(saved_links)
+        bl.CONFIG.clear()
+        bl.CONFIG.update(saved_cfg)
+
+
+def test_every_sku_gets_a_working_button_at_every_rung():
+    """No SKU may end up with a dead button in any configuration."""
+    import importlib
+    root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(root / "site"))
+    bl = importlib.import_module("build_landing")
+    pricing = json.loads((root / "site" / "pricing.json").read_text())
+    saved = dict(bl.CONFIG)
+    try:
+        for service_url in ("", "https://app.example.com"):
+            bl.CONFIG["service_url"] = service_url
+            for row in pricing["property"] + pricing["vehicle"] + pricing["lot_plans"]:
+                html = bl.buy(row["sku"])
+                assert 'href=""' not in html and "href=" in html, row["sku"]
+    finally:
+        bl.CONFIG.clear()
+        bl.CONFIG.update(saved)

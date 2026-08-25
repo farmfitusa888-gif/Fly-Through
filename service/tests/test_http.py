@@ -783,3 +783,57 @@ def test_a_payout_cannot_be_posted_without_csrf(app_with_operator):
     sign_in(c, app_with_operator, "boss@flythrough.test")
     assert c.post("/admin/payouts",
                   data={"reseller_id": "res_x", "csrf": "no"}).status_code == 404
+
+
+# ------------------------------------------------- arriving from the site
+
+
+def test_a_link_from_the_marketing_site_starts_the_flow(client, app):
+    """GET /order?sku=... is the href a static page can produce: no session, no
+    CSRF token to give."""
+    r = client.get("/order?sku=re-listing-pro", follow_redirects=False)
+    assert r.status_code == 303 and "/login" in r.headers["location"]
+    sign_in(client, app)
+    r = client.get("/order?sku=re-listing-pro", follow_redirects=False)
+    assert r.status_code == 303 and "/shoot/" in r.headers["location"]
+
+
+def test_arriving_lands_on_the_shot_list_not_the_brief(client, app):
+    """Someone who clicked Buy is about to take photographs. Put the shot list
+    in front of them, not a form."""
+    sign_in(client, app)
+    r = client.get("/order?sku=veh-ad-premium", follow_redirects=False)
+    assert "/shoot/" in r.headers["location"]
+
+
+def test_an_unknown_sku_from_a_stale_link_goes_home(client, app):
+    sign_in(client, app)
+    r = client.get("/order?sku=this-was-discontinued", follow_redirects=False)
+    assert r.headers["location"] == "/"
+
+
+def test_a_signed_out_visitor_creates_no_order(client, app):
+    """A GET that created a paid-for object would be a URL a crawler could fire."""
+    client.get("/order?sku=re-listing-pro", follow_redirects=False)
+    with app.state.db.tx() as c:
+        assert c.execute("SELECT count(*) FROM orders").fetchone()[0] == 0
+
+
+def test_a_referral_survives_the_hop_through_sign_in(client, app):
+    """The partner link lands on the marketing site, the customer clicks Buy,
+    then signs in. The attribution has to survive both hops or the partner is
+    never paid for the customer they sent."""
+    client.post("/partner/join", data={"name": "Sam", "email": "sam@p.com"})
+    with app.state.db.tx() as c:
+        code = c.execute("SELECT code FROM resellers").fetchone()["code"]
+        rid = c.execute("SELECT id FROM resellers").fetchone()["id"]
+
+    client.get(f"/order?sku=re-listing-pro&ref={code}", follow_redirects=False)
+    sign_in(client, app, "buyer@example.com")
+    r = client.get("/order?sku=re-listing-pro", follow_redirects=False)
+    oid = r.headers["location"].rsplit("/", 1)[1]
+    _pay(client, oid)
+
+    from flythrough_service import reseller
+    assert reseller.ledger(app.state.db, rid,
+                           payout_minimum_cents=0).lifetime_cents == 6225

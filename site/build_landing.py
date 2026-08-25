@@ -266,12 +266,21 @@ def buy(sku: str, label: str = "Buy") -> str:
 
     Payment Links are public URLs with no key in them, which is what lets a
     static page take money with no backend to secure."""
+    # Preference order, and it is not arbitrary. The service checks the
+    # customer's photographs BEFORE charging them, which is the whole thesis; a
+    # Payment Link takes the money first and finds out afterwards. So route to
+    # the app whenever it is live, and fall back only when it is not.
+    app_url = CONFIG.get("service_url", "").rstrip("/")
+    if app_url:
+        return (f'<a class="buy" href="{app_url}/order?sku={sku}" data-sku="{sku}">'
+                f'Start <span aria-hidden="true">&rarr;</span></a>')
     href = LINKS.get(sku, "")
     if href:
         return (f'<a class="buy" href="{href}" data-sku="{sku}">{label} '
                 f'<span aria-hidden="true">&rarr;</span></a>')
     subj = f"Order — {sku}"
-    return (f'<a class="buy ghost" href="mailto:{CONFIG["contact_email"]}'
+    return (f'<a class="buy ghost" data-sku="{sku}" '
+            f'href="mailto:{CONFIG["contact_email"]}'
             f'?subject={subj.replace(" ", "%20").replace("—", "%E2%80%94")}">'
             f'Order by email <span aria-hidden="true">&rarr;</span></a>')
 

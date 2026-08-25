@@ -25,5 +25,7 @@
       "prod-single": "",
       "prod-three": ""
     }
-  }
+  },
+  "service_url": "",
+  "_service_note": "Where the self-serve app is deployed, e.g. https://app.iflythroughit.com or /app behind a reverse proxy. When set, every Buy button routes into the upload-first flow instead of straight to Stripe -- which is the point: the customer's photographs are checked BEFORE they are charged. Leave empty until the service is actually live; the buttons then fall back to Payment Links, and to email after that."
 }

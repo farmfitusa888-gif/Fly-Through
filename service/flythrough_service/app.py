@@ -198,6 +198,30 @@ def create_app(settings: Settings | None = None, *, renderer=None,
                             httponly=True, samesite="lax")
         return resp
 
+    @app.get("/order")
+    def start_order_get(request: Request, sku: str = "", ref: str = ""):
+        """Entry point from the marketing site: /order?sku=... in a link.
+
+        A GET because it arrives as an href from a static page that has no
+        session and no CSRF token to give. It creates nothing on its own -- it
+        sends the visitor to sign in, and the POST on the other side is what
+        makes the order. A GET that created a paid-for object would be a URL a
+        crawler could fire.
+        """
+        try:
+            cat.get(sku)
+        except cat.UnknownSku:
+            return RedirectResponse("/", 303)
+        p = who(request)
+        if p is None or p.customer_id is None:
+            resp = RedirectResponse(f"/login?next=/order%3Fsku%3D{quote(sku)}", 303)
+            if ref:
+                resp.set_cookie(REFERRAL_COOKIE, ref[:16].upper(),
+                                max_age=90 * 86400, httponly=True, samesite="lax")
+            return resp
+        oid = orders.create(db, p.customer_id, sku)
+        return RedirectResponse(f"/shoot/{oid}", 303)
+
     @app.post("/order")
     def start_order(request: Request, sku: str = Form(...)):
         p = who(request)

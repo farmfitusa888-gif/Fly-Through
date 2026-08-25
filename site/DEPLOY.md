@@ -39,6 +39,29 @@ Turn HTTPS on for all four names before the first Payment Link goes live.
 Stripe will redirect a paying customer to `/start`, and a certificate warning at
 that exact moment is the most expensive one you can serve.
 
+## The self-serve app
+
+`service/` is a separate deployment from the static site. Point
+`service_url` in `site/config.json` at it and every Buy button routes into the
+upload-first flow instead of straight to Stripe.
+
+That precedence is the product, not a preference: the app checks a customer's
+photographs **before** charging them, and a Payment Link takes the money first
+and finds out afterwards. Leave `service_url` empty until the app is genuinely
+live — the buttons fall back to Payment Links, then to email, and never to a
+dead link.
+
+Two shapes work:
+
+| Shape | `service_url` | Notes |
+|---|---|---|
+| Subdomain | `https://app.iflythroughit.com` | Simplest. Separate cert, separate box. |
+| Same origin | `/app` | Needs a reverse proxy in front of both. One cookie domain, no CORS. |
+
+Same origin is worth the proxy: the sign-in cookie, the shot list and the
+originals page all end up under one name, which is one fewer thing to explain to
+a customer standing in a driveway.
+
 ## Going live in the order that de-risks it
 
 **1. Deploy with no Payment Links at all.** Every price renders an *Order by
