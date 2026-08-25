@@ -327,3 +327,180 @@ def test_customer_text_is_escaped_not_rendered(client, app):
     html = client.get(f"/order/{oid}").text
     assert "<script>alert(1)</script>" not in html
     assert "&lt;script&gt;" in html
+
+
+# -------------------------------------------------------------- operator only
+
+
+@pytest.fixture()
+def app_with_operator(tmp_path, monkeypatch):
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", SECRET)
+    monkeypatch.setenv("FLYTHROUGH_SECRET_KEY", "test-key")
+    monkeypatch.setenv("FLYTHROUGH_OPERATORS", "boss@flythrough.test")
+    s = load(data_dir=tmp_path, dev=True)
+    return create_app(s, renderer=lambda **kw: [])
+
+
+def test_a_customer_cannot_read_the_operator_queue(app_with_operator):
+    """It lists every order in the system. `require()` only proved someone was
+    signed in, which let any customer read the whole book of business."""
+    c = TestClient(app_with_operator)
+    sign_in(c, app_with_operator, "buyer@example.com")
+    assert c.get("/admin/queue").status_code == 404
+
+
+def test_an_operator_can_read_the_queue(app_with_operator):
+    c = TestClient(app_with_operator)
+    sign_in(c, app_with_operator, "boss@flythrough.test")
+    assert c.get("/admin/queue").status_code == 200
+
+
+def test_a_signed_out_visitor_gets_404_not_a_redirect(app_with_operator):
+    """404, not 403 or a login redirect: both of those confirm an operator
+    console exists at this path and is worth attacking."""
+    assert TestClient(app_with_operator).get("/admin/queue").status_code == 404
+
+
+def test_production_with_no_operator_list_admits_nobody(tmp_path, monkeypatch):
+    """Empty list must fail closed, not open."""
+    for k in ("FLYTHROUGH_OPERATORS",):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", SECRET)
+    monkeypatch.setenv("FLYTHROUGH_SECRET_KEY", "k")
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "k")
+    monkeypatch.setenv("FLYTHROUGH_SMTP_URL", "smtp://x")
+    s = load(data_dir=tmp_path, dev=False)
+    app = create_app(s, renderer=lambda **kw: [])
+    c = TestClient(app)
+    # Session made directly: in production the login route sends real mail, and
+    # a test must never be one bad env var away from emailing a stranger.
+    from flythrough_service import auth
+    tok = auth.issue_login_token(app.state.db, "anyone@example.com", ttl_s=600)
+    session, _ = auth.redeem_login_token(app.state.db, tok, session_ttl_s=600)
+    c.cookies.set(SESSION_COOKIE, session)
+    assert auth.resolve_session(app.state.db, session), "session should be valid"
+    assert c.get("/admin/queue").status_code == 404
+
+
+# ---------------------------------------------------------------- notifications
+
+
+def _pay(client, oid, amount=24900, eid="evt_n"):
+    ev = {"id": eid, "type": "checkout.session.completed",
+          "data": {"object": {"id": "cs", "payment_status": "paid",
+                              "amount_total": amount, "client_reference_id": oid}}}
+    raw = json.dumps(ev).encode()
+    return client.post("/webhooks/stripe", content=raw,
+                       headers={"stripe-signature": payments.sign(raw, SECRET)})
+
+
+def _subjects(app, to):
+    return [m.subject for m in app.state.mailer.outbox() if m.to == to]
+
+
+def test_the_customer_is_told_when_the_film_is_ready(client, app):
+    """The one message the whole service exists to send. Before this, an order
+    could complete and the customer would never learn it."""
+    email = "agent@example.com"
+    sign_in(client, app, email)
+    oid = start_order(client)
+    csrf = csrf_of(client, app, f"/order/{oid}")
+    client.post(f"/order/{oid}/upload", data={"csrf": csrf}, files=[
+        ("files", (f"{i:02d}_{n}.jpg", io.BytesIO(JPEG + bytes([i])), "image/jpeg"))
+        for i, n in enumerate(["front-elevation", "foyer", "kitchen", "patio"], 1)])
+    client.post(f"/order/{oid}/brief", data={
+        "q0": "1 Test St", "q1": "Test Realty", "q2": "daylight", "csrf": csrf})
+    _pay(client, oid)
+    app.state.worker.run_one()
+
+    subs = _subjects(app, email)
+    assert any("order received" in s for s in subs), subs
+    assert any("your film is ready" in s for s in subs), subs
+
+
+def test_a_failure_is_admitted_not_hidden(tmp_path, monkeypatch):
+    """A customer who has to ask what happened to the film they paid for is
+    already a refund."""
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", SECRET)
+    monkeypatch.setenv("FLYTHROUGH_SECRET_KEY", "k")
+    s = load(data_dir=tmp_path, dev=True)
+
+    def boom(**kw):
+        raise RuntimeError("provider exploded")
+
+    app = create_app(s, renderer=boom)
+    c = TestClient(app)
+    email = "agent@example.com"
+    sign_in(c, app, email)
+    oid = start_order(c)
+    csrf = csrf_of(c, app, f"/order/{oid}")
+    c.post(f"/order/{oid}/upload", data={"csrf": csrf}, files=[
+        ("files", (f"{i:02d}_{n}.jpg", io.BytesIO(JPEG + bytes([i])), "image/jpeg"))
+        for i, n in enumerate(["front-elevation", "foyer", "kitchen", "patio"], 1)])
+    c.post(f"/order/{oid}/brief", data={
+        "q0": "1 Test St", "q1": "Test Realty", "q2": "daylight", "csrf": csrf})
+    _pay(c, oid)
+    from flythrough_service import queue as qq
+    for _ in range(qq.MAX_ATTEMPTS + 1):
+        app.state.worker.run_one()
+
+    assert any("a problem with your order" in x for x in _subjects(app, email))
+
+
+def test_a_customer_is_never_told_twice_about_one_order(client, app):
+    """Nobody forgives being emailed three times about one order."""
+    email = "agent@example.com"
+    sign_in(client, app, email)
+    oid = start_order(client)
+    csrf = csrf_of(client, app, f"/order/{oid}")
+    client.post(f"/order/{oid}/upload", data={"csrf": csrf}, files=[
+        ("files", (f"{i:02d}_{n}.jpg", io.BytesIO(JPEG + bytes([i])), "image/jpeg"))
+        for i, n in enumerate(["front-elevation", "foyer", "kitchen", "patio"], 1)])
+    client.post(f"/order/{oid}/brief", data={
+        "q0": "1 Test St", "q1": "Test Realty", "q2": "daylight", "csrf": csrf})
+    for i in range(4):                       # webhook redelivery storm
+        _pay(client, oid, eid=f"evt_{i}")
+    app.state.worker.run_one()
+    app.state.worker.run_one()
+
+    subs = _subjects(app, email)
+    assert sum("order received" in x for x in subs) == 1, subs
+    assert sum("your film is ready" in x for x in subs) == 1, subs
+
+
+def test_a_bounced_notification_cannot_undo_a_delivery(tmp_path, monkeypatch):
+    """The film exists either way. A mail failure must not turn a delivered
+    order back into a failed one."""
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", SECRET)
+    monkeypatch.setenv("FLYTHROUGH_SECRET_KEY", "k")
+    s = load(data_dir=tmp_path, dev=True)
+
+    def renderer(*, out_dir, slug, **kw):
+        m = Path(out_dir) / f"{slug}.mp4"
+        m.write_bytes(b"v")
+        return [("master", m)]
+
+    app = create_app(s, renderer=renderer)
+
+    class Exploding:
+        def send(self, *a, **k):
+            raise RuntimeError("smtp is on fire")
+
+        def outbox(self):
+            return []
+
+    app.state.worker.mailer = Exploding()
+    c = TestClient(app)
+    sign_in(c, app, "agent@example.com")
+    oid = start_order(c)
+    csrf = csrf_of(c, app, f"/order/{oid}")
+    c.post(f"/order/{oid}/upload", data={"csrf": csrf}, files=[
+        ("files", (f"{i:02d}_{n}.jpg", io.BytesIO(JPEG + bytes([i])), "image/jpeg"))
+        for i, n in enumerate(["front-elevation", "foyer", "kitchen", "patio"], 1)])
+    c.post(f"/order/{oid}/brief", data={
+        "q0": "1 Test St", "q1": "Test Realty", "q2": "daylight", "csrf": csrf})
+    _pay(c, oid)
+    app.state.worker.run_one()
+
+    from flythrough_service import orders
+    assert orders.get(app.state.db, oid)["status"] == "delivered"

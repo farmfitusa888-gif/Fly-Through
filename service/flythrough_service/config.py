@@ -64,6 +64,13 @@ class Settings:
     render_concurrency: int = 2        # OpenArt caps parallel jobs at 4; leave headroom
     dev_mode: bool = True
 
+    # Who may see the operator pages. An allow-list of addresses rather than a
+    # role column: there are one or two operators, they are known by name, and a
+    # role column is a thing that can be set to the wrong value by a bug.
+    # Empty in dev so the pages are reachable on a laptop; empty in PRODUCTION
+    # means nobody gets in, which is the safe direction.
+    operator_emails: frozenset[str] = field(default_factory=frozenset)
+
     allowed_upload_types: frozenset[str] = field(default_factory=lambda: frozenset({
         "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif",
     }))
@@ -87,6 +94,10 @@ def load(data_dir: Path | None = None, *, dev: bool | None = None) -> Settings:
         stripe_webhook_secret=os.environ.get("STRIPE_WEBHOOK_SECRET", ""),
         smtp_url=os.environ.get("FLYTHROUGH_SMTP_URL", ""),
         dev_mode=dev_mode,
+        operator_emails=frozenset(
+            e.strip().lower()
+            for e in os.environ.get("FLYTHROUGH_OPERATORS", "").split(",")
+            if e.strip()),
     )
     if not dev_mode:
         missing = [n for n, v in (

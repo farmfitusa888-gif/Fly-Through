@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
-from . import orders, render
+from . import notify, orders, render
 from .db import Database, new_id, now
 
 MAX_ATTEMPTS = 3
@@ -44,6 +44,12 @@ class Worker:
     data_dir: Path
     renderer: Renderer
     concurrency: int = 2
+    # Optional so the queue is testable without a mail transport. When they are
+    # supplied a delivered order tells the customer, and a failed one tells them
+    # too -- a customer who has to ask what happened to the film they paid for
+    # is already a refund.
+    mailer: object = None
+    settings: object = None
 
     _stop: threading.Event = None            # type: ignore[assignment]
     _threads: list = None                    # type: ignore[assignment]
@@ -96,6 +102,9 @@ class Worker:
                           " WHERE id = ?", (now(), job["id"]))
                 orders.transition(c, self.db, oid, "delivered")
                 self.db.log(c, "job.done", oid, job["id"])
+            # AFTER the commit. An email announcing a delivery that then rolled
+            # back is worse than a late email.
+            self._tell(oid, delivered=True)
             return job["id"]
         except Exception as exc:
             detail = f"{type(exc).__name__}: {exc}"
@@ -119,6 +128,7 @@ class Worker:
                 (self.data_dir / "failures").mkdir(parents=True, exist_ok=True)
                 (self.data_dir / "failures" / f"{job['id']}.txt").write_text(
                     traceback.format_exc())
+                self._tell(oid, delivered=False)
             return job["id"]
 
     def _render(self, order_id: str) -> None:
@@ -157,6 +167,30 @@ class Worker:
                           " bytes, created_at) VALUES(?,?,?,?,?,?)",
                           (new_id("dlv"), order_id, kind, str(p),
                            p.stat().st_size if p.is_file() else 0, now()))
+
+    def _tell(self, order_id: str, *, delivered: bool) -> None:
+        """Notify the customer. Never allowed to undo the job's outcome: the
+        film exists either way, and a bounced address must not turn a delivered
+        order back into a failed one."""
+        if self.mailer is None or self.settings is None:
+            return
+        o = orders.get(self.db, order_id)
+        if o is None:
+            return
+        from . import catalog_bridge as cat
+        sku = cat.skus().get(o["sku"])
+        what = sku.name if sku else o["sku"]
+        try:
+            if delivered:
+                kinds = [d["kind"] for d in orders.deliverables(self.db, order_id)]
+                notify.delivered(self.db, self.mailer, self.settings, order_id,
+                                 what=what, kinds=kinds)
+            else:
+                notify.failed(self.db, self.mailer, self.settings, order_id,
+                              what=what)
+        except Exception as exc:                      # noqa: BLE001
+            with self.db.tx() as c:
+                self.db.log(c, "notify.error", order_id, str(exc)[:300])
 
     # --------------------------------------------------------------- lifecycle
     def _loop(self) -> None:

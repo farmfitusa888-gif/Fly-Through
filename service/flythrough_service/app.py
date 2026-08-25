@@ -31,7 +31,8 @@ from urllib.parse import quote
 from fastapi import FastAPI, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, FileResponse
 
-from . import auth, catalog_bridge as cat, orders, payments, render, reseller
+from . import (auth, catalog_bridge as cat, notify, orders, payments,
+               render, reseller)
 from .config import Settings, load
 from .db import Database, new_id, now
 from .mail import Mailer
@@ -96,7 +97,8 @@ def create_app(settings: Settings | None = None, *, renderer=None,
                     sender=s.contact_email)
     worker = Worker(db=db, data_dir=s.data_dir,
                     renderer=renderer or default_renderer,
-                    concurrency=s.render_concurrency)
+                    concurrency=s.render_concurrency,
+                    mailer=mailer, settings=s)
 
     app = FastAPI(title=s.brand, docs_url=None, redoc_url=None,
                   openapi_url=None)
@@ -130,6 +132,20 @@ def create_app(settings: Settings | None = None, *, renderer=None,
         if p is None:
             return None
         return p
+
+    def is_operator(request: Request) -> bool:
+        """Operator pages list every order in the system. `require()` only
+        proves SOMEONE is signed in -- which was enough to let any customer read
+        the whole queue. Membership is checked by address against the
+        allow-list, and in production an empty list admits nobody.
+        """
+        p = who(request)
+        if p is None:
+            return False
+        if s.dev_mode and not s.operator_emails:
+            return True          # laptop with nothing configured
+        email = auth.email_of(db, p)
+        return bool(email) and email in s.operator_emails
 
     def check_csrf(request: Request, token: str) -> bool:
         sess = request.cookies.get(SESSION_COOKIE) or ""
@@ -367,6 +383,11 @@ def create_app(settings: Settings | None = None, *, renderer=None,
             return Response(str(e), status_code=400)
         msg, paid = payments.handle(db, event)
         if paid:
+            o = orders.get(db, paid)
+            sku = cat.skus().get(o["sku"]) if o else None
+            notify.receipt(db, mailer, s, paid,
+                           what=(sku.name if sku else o["sku"]),
+                           amount_cents=o["price_cents"])
             worker.enqueue(paid)
         return Response(msg, status_code=200)
 
@@ -588,9 +609,10 @@ def create_app(settings: Settings | None = None, *, renderer=None,
     # ---------------------------------------------------------------- admin
     @app.get("/admin/queue", response_class=HTMLResponse)
     def admin_queue(request: Request):
-        p = require(request)
-        if p is None:
-            return RedirectResponse("/login", 303)
+        if not is_operator(request):
+            # 404, not 403. A 403 tells an unauthorised reader that an operator
+            # console exists at this path and is worth attacking.
+            return Response("Not found", status_code=404)
         with db.tx() as c:
             jobs = c.execute(
                 "SELECT j.*, o.sku, o.status ostatus FROM jobs j"

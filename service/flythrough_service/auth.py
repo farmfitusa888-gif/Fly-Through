@@ -118,6 +118,17 @@ def resolve_session(db: Database, session_token: str | None) -> Principal | None
                          reseller_id=row["reseller_id"])
 
 
+def email_of(db: Database, principal: Principal) -> str | None:
+    with db.tx() as c:
+        if principal.reseller_id:
+            row = c.execute("SELECT email FROM resellers WHERE id = ?",
+                            (principal.reseller_id,)).fetchone()
+        else:
+            row = c.execute("SELECT email FROM customers WHERE id = ?",
+                            (principal.customer_id,)).fetchone()
+    return row["email"] if row else None
+
+
 def end_session(db: Database, session_token: str) -> None:
     with db.tx() as c:
         c.execute("DELETE FROM sessions WHERE token_hash = ?",
