@@ -1088,3 +1088,104 @@ def test_an_empty_upload_from_the_shot_list_shows_the_error(client, app):
                     headers={"referer": f"http://testserver/shoot/{oid}"},
                     follow_redirects=False)
     assert f"/shoot/{oid}" in r.headers["location"] and "err=" in r.headers["location"]
+
+
+# ------------------------------------------------- operator-rendered orders
+
+
+def _ready_paid_order(client, app, sku="re-listing-pro"):
+    """A paid order with enough real photographs to plan."""
+    sign_in(client, app, "agent@example.com")
+    oid = start_order(client, sku)
+    csrf = csrf_of(client, app, f"/order/{oid}")
+    client.post(f"/order/{oid}/upload", data={"csrf": csrf}, files=[
+        ("files", (f"{i:02d}_{n}.jpg", io.BytesIO(JPEG + bytes([i])), "image/jpeg"))
+        for i, n in enumerate(["front-elevation", "foyer", "kitchen", "patio"], 1)])
+    client.post(f"/order/{oid}/brief", data={
+        "q0": "1420 Cedar Ridge Rd", "q1": "Cedar Realty", "q2": "golden hour",
+        "csrf": csrf})
+    _pay(client, oid)
+    return oid
+
+
+def test_the_render_sheet_carries_the_plan_and_the_cost(client, app):
+    """The point of the whole manual path: an order can be worked by hand on
+    the account that already exists, with no provider integration at all."""
+    oid = _ready_paid_order(client, app)
+    page = client.get(f"/admin/order/{oid}").text
+    assert "1420 Cedar Ridge Rd" in page
+    assert "Shot 1" in page
+    assert "Credits (est.)" in page and "Cost (est.)" in page
+    assert "startFrame" in page or "start" in page
+
+
+def test_the_sheet_gives_the_exact_prompts(client, app):
+    """An operator working from a summary would write their own prompt, and the
+    negative bank is most of what keeps a shot from inventing a room."""
+    oid = _ready_paid_order(client, app)
+    txt = client.get(f"/admin/order/{oid}/sheet.txt").text
+    assert "prompt     :" in txt and "negative   :" in txt
+    assert txt.count("--- shot") >= 3
+
+
+def test_the_sheet_names_the_style_from_the_customers_answer(client, app):
+    oid = _ready_paid_order(client, app)
+    assert "goldenhour" in client.get(f"/admin/order/{oid}/sheet.txt").text
+
+
+def test_the_render_sheet_is_operator_only(app_with_operator):
+    c = TestClient(app_with_operator)
+    oid = _ready_paid_order(c, app_with_operator)
+    c.cookies.clear()
+    sign_in(c, app_with_operator, "buyer@example.com")
+    assert c.get(f"/admin/order/{oid}").status_code == 404
+    assert c.get(f"/admin/order/{oid}/sheet.txt").status_code == 404
+
+
+def test_an_unpaid_order_has_no_render_sheet(client, app):
+    """Rendering before payment is how you do free work by accident."""
+    sign_in(client, app)
+    oid = start_order(client)
+    assert "Not ready" in client.get(f"/admin/order/{oid}").text
+
+
+def test_uploading_clips_delivers_the_order(client, app, tmp_path):
+    """The manual route must end in the same place as the automatic one."""
+    import subprocess
+    oid = _ready_paid_order(client, app)
+    clips = []
+    for i in range(1, 4):
+        f = tmp_path / f"shot_{i:02d}.mp4"
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+                        "-i", f"testsrc2=s=320x180:d=1:r=30", "-c:v", "libx264",
+                        "-pix_fmt", "yuv420p", str(f)], check=True)
+        clips.append(f)
+    csrf = csrf_of(client, app, f"/admin/order/{oid}")
+    r = client.post(f"/admin/order/{oid}/clips", data={"csrf": csrf},
+                    files=[("files", (c.name, c.read_bytes(), "video/mp4"))
+                           for c in clips], follow_redirects=False)
+    assert "err=" not in r.headers["location"], r.headers["location"]
+
+    from flythrough_service import orders
+    assert orders.get(app.state.db, oid)["status"] == "delivered"
+    kinds = {d["kind"] for d in orders.deliverables(app.state.db, oid)}
+    assert "master" in kinds
+    assert any("your film is ready" in m.subject
+               for m in app.state.mailer.outbox() if m.to == "agent@example.com")
+
+
+def test_delivering_with_no_clips_is_refused(client, app):
+    oid = _ready_paid_order(client, app)
+    csrf = csrf_of(client, app, f"/admin/order/{oid}")
+    r = client.post(f"/admin/order/{oid}/clips", data={"csrf": csrf},
+                    follow_redirects=False)
+    assert "err=" in r.headers["location"]
+    from flythrough_service import orders
+    assert orders.get(app.state.db, oid)["status"] != "delivered"
+
+
+def test_clips_cannot_be_posted_without_csrf(client, app):
+    oid = _ready_paid_order(client, app)
+    r = client.post(f"/admin/order/{oid}/clips", data={"csrf": "no"},
+                    files=[("files", ("shot_01.mp4", b"x", "video/mp4"))])
+    assert r.status_code == 404

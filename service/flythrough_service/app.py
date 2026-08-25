@@ -31,7 +31,7 @@ from urllib.parse import quote
 from fastapi import FastAPI, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, FileResponse
 
-from . import (auth, catalog_bridge as cat, limits, notify, orders,
+from . import (auth, catalog_bridge as cat, limits, manual, notify, orders,
                outcomes, payments, render, reseller)
 from .config import Settings, load
 from .db import Database, new_id, now
@@ -985,6 +985,123 @@ def create_app(settings: Settings | None = None, *, renderer=None,
                             + f"\n\nYour ledger: {s.base_url}/partner\n")
         return RedirectResponse("/admin/payouts", 303)
 
+    @app.get("/admin/order/{order_id}", response_class=HTMLResponse)
+    def admin_order(request: Request, order_id: str, err: str = "", msg: str = ""):
+        """The render sheet, for working an order by hand.
+
+        This is how the service earns its keep before any provider integration
+        exists: the order, the plan, the exact prompts and the cost, on one
+        page. The operator renders through the tools they already have and
+        uploads the clips here.
+        """
+        if not is_operator(request):
+            return Response("Not found", status_code=404)
+        try:
+            brief = manual.build(db, s.data_dir, order_id)
+        except manual.NotReady as e:
+            return render_page(request, "Not ready",
+                               f"<h1>Not ready</h1><p>{esc(e)}</p>"
+                               f'<p><a href="/admin/queue">Back to the queue</a></p>',
+                               narrow=True)
+        o = orders.get(db, order_id)
+        shots = "".join(
+            f'<div class="card plain"><h3>Shot {sh["n"]} &middot; '
+            f'{esc(sh["from"])} &rarr; {esc(sh["to"])}</h3>'
+            f'<p class="mono">{esc(sh["move"])} &middot; {sh["seconds"]}s</p>'
+            f'<p class="mono">start &nbsp;{esc(sh["start_frame"])}<br>'
+            f'end &nbsp;&nbsp;&nbsp;{esc(sh["end_frame"])}</p>'
+            f'<p><strong>Prompt</strong><br>{esc(sh["prompt"])}</p>'
+            f'<p class="note"><strong>Negative</strong><br>'
+            f'{esc(sh["negative_prompt"])}</p></div>' for sh in brief.shots)
+
+        blocked = ("".join(f'<li><span>{esc(b)}</span></li>' for b in brief.blocks))
+        warn = ("".join(f'<li><span>{esc(w)}</span></li>' for w in brief.warnings))
+        gate = (f'<div class="flash err">Do not render. The shot set cannot be '
+                f'filmed:<ul class="plain">{blocked}</ul></div>' if brief.blocks
+                else "")
+
+        body = (
+            f'{flash(err) or flash(msg, "ok")}{gate}'
+            f'<p class="kicker">Render sheet</p><h1>{esc(brief.listing)}</h1>'
+            f'<div class="grid">'
+            f'<div class="stat"><div class="big">{len(brief.shots)}</div>'
+            f'<div class="l">Shots</div></div>'
+            f'<div class="stat"><div class="big">{brief.total_seconds}s</div>'
+            f'<div class="l">Runtime</div></div>'
+            f'<div class="stat"><div class="big">{brief.credits}</div>'
+            f'<div class="l">Credits (est.)</div></div>'
+            f'<div class="stat"><div class="big">'
+            f'{esc("$%.2f" % brief.usd)}</div>'
+            f'<div class="l">Cost (est.)</div></div></div>'
+            + (f'<div class="card"><h3>Check before rendering</h3>'
+               f'<ul class="plain">{warn}</ul></div>' if warn else "")
+            + f'<div class="card"><h3>Originals</h3>'
+              f'<p class="mono">{esc(brief.originals_dir)}</p>'
+              f'<p class="note">Upload these to the provider first. The anchor '
+              f'frames must be the customer\'s own files &mdash; anything '
+              f're-rendered is no longer an original, and the disclosure page '
+              f'stops being true.</p>'
+              f'<p><a href="/admin/order/{esc(order_id)}/sheet.txt">'
+              f'Plain-text render sheet &rarr;</a></p></div>'
+            + shots
+            + f'<div class="card"><h3>Finished clips</h3>'
+              f'<p>Upload every rendered shot. Name them so the shot number is '
+              f'recoverable &mdash; <span class="mono">shot_01.mp4</span> and so '
+              f'on. The order is delivered and the customer emailed when they '
+              f'all land.</p>'
+              f'<form method="post" action="/admin/order/{esc(order_id)}/clips" '
+              f'enctype="multipart/form-data">{csrf_field(request)}'
+              f'<input type="file" name="files" multiple accept="video/*">'
+              f'<button>Deliver {len(brief.shots)} clips</button></form></div>'
+              f'<p class="note"><a href="/admin/queue">&larr; Queue</a> &middot; '
+              f'status {status_pill(o["status"])}</p>')
+        return render_page(request, "Render sheet", body)
+
+    @app.get("/admin/order/{order_id}/sheet.txt")
+    def admin_sheet(request: Request, order_id: str):
+        if not is_operator(request):
+            return Response("Not found", status_code=404)
+        try:
+            return Response(manual.as_text(manual.build(db, s.data_dir, order_id)),
+                            media_type="text/plain; charset=utf-8")
+        except manual.NotReady as e:
+            return Response(str(e), status_code=409)
+
+    @app.post("/admin/order/{order_id}/clips")
+    async def admin_clips(request: Request, order_id: str,
+                          files: list[UploadFile] = None, csrf: str = Form("")):
+        """Accept operator-rendered clips and finish the order.
+
+        Assembly runs through the SAME deliver() the automatic path uses, so a
+        hand-worked order and a machine-worked one produce an identical file.
+        """
+        if not is_operator(request) or not check_csrf(request, csrf):
+            return Response("Not found", status_code=404)
+        if not files:
+            return RedirectResponse(
+                f"/admin/order/{order_id}?err={quote('no clips came through')}", 303)
+        work = render.output_dir(s.data_dir, order_id) / "clips"
+        work.mkdir(parents=True, exist_ok=True)
+        saved = []
+        for f in sorted(files, key=lambda x: x.filename or ""):
+            name = Path(f.filename or "clip.mp4").name
+            if not name.lower().endswith((".mp4", ".mov", ".m4v", ".webm")):
+                continue
+            dest = work / name
+            dest.write_bytes(await f.read())
+            saved.append(dest)
+        if not saved:
+            return RedirectResponse(
+                f"/admin/order/{order_id}?err={quote('no video files in that upload')}",
+                303)
+        try:
+            worker.deliver_manual(order_id, saved)
+        except Exception as exc:                              # noqa: BLE001
+            return RedirectResponse(
+                f"/admin/order/{order_id}?err={quote(str(exc)[:160])}", 303)
+        return RedirectResponse(
+            f"/admin/order/{order_id}?msg={quote('delivered')}", 303)
+
     @app.post("/admin/ask")
     def admin_ask(request: Request, csrf: str = Form("")):
         """Send the outstanding "did it sell?" asks. Operator-triggered rather
@@ -1019,12 +1136,14 @@ def create_app(settings: Settings | None = None, *, renderer=None,
         rows = "".join(
             f'<tr><td class="k">{esc(j["order_id"])}</td><td>{esc(j["sku"])}</td>'
             f'<td>{status_pill(j["status"])}</td><td>{j["attempts"]}</td>'
-            f'<td class="note">{esc(j["error"][:80])}</td></tr>' for j in jobs)
+            f'<td class="note">{esc(j["error"][:60])}</td>'
+            f'<td><a href="/admin/order/{esc(j["order_id"])}">Render sheet</a>'
+            f'</td></tr>' for j in jobs)
         summ = outcomes.summary(db)
         pending = len(outcomes.due(db))
         body = (f'<h1>Queue</h1><p class="lede">{esc(worker.stats())}</p>'
                 f'<table><tr><th>Order</th><th>SKU</th><th>Job</th>'
-                f'<th>Tries</th><th>Error</th></tr>{rows}</table>'
+                f'<th>Tries</th><th>Error</th><th></th></tr>{rows}</table>'
                 f'<h2>Outcomes</h2>'
                 f'<div class="grid">'
                 f'<div class="stat"><div class="big">{summ["answered"]}</div>'

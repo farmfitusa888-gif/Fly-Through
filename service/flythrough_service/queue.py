@@ -176,6 +176,56 @@ class Worker:
                           (new_id("dlv"), order_id, kind, str(p),
                            p.stat().st_size if p.is_file() else 0, now()))
 
+    def deliver_manual(self, order_id: str, clips: list) -> None:
+        """Finish an order the operator rendered by hand.
+
+        Goes through the SAME assemble path as the automatic route, so a
+        hand-worked order and a machine-worked one produce an identical file.
+        The only difference is where the clips came from, and that must not be
+        visible in the delivery.
+        """
+        from flythrough.assemble import deliver
+        o = orders.get(self.db, order_id)
+        if o is None:
+            raise RuntimeError("no such order")
+        if o["status"] not in ("paid", "rendering"):
+            raise RuntimeError(f"order is {o['status']}, not awaiting a render")
+        if not clips:
+            raise RuntimeError("no clips")
+
+        with self.db.tx() as c:
+            if o["status"] == "paid":
+                orders.transition(c, self.db, order_id, "rendering")
+
+        out = render.output_dir(self.data_dir, order_id) / "delivery"
+        out.mkdir(parents=True, exist_ok=True)
+        slug = render.slug_for(order_id, json.loads(o["brief"] or "{}"))
+        # Sorted by filename, which is why the operator is told to name them
+        # shot_01, shot_02. Cut order is the product; a shuffled delivery is
+        # not a lesser version of it, it is a different film.
+        d = deliver(sorted(clips, key=lambda p: Path(p).name), out,
+                    slug=slug, crossfade=0.0, fps=30)
+
+        produced = [("master", Path(d.master_web or d.master))]
+        if d.vertical:
+            produced.append(("vertical", Path(d.vertical_web or d.vertical)))
+        if d.thumbnail:
+            produced.append(("thumb", Path(d.thumbnail)))
+
+        with self.db.tx() as c:
+            c.execute("DELETE FROM deliverables WHERE order_id = ?", (order_id,))
+            for kind, path in produced:
+                c.execute("INSERT INTO deliverables(id, order_id, kind, path,"
+                          " bytes, created_at) VALUES(?,?,?,?,?,?)",
+                          (new_id("dlv"), order_id, kind, str(path),
+                           path.stat().st_size if path.is_file() else 0, now()))
+            c.execute("UPDATE jobs SET status='done', finished_at=?, error=''"
+                      " WHERE order_id = ? AND status IN ('queued','running')",
+                      (now(), order_id))
+            orders.transition(c, self.db, order_id, "delivered")
+            self.db.log(c, "job.delivered_by_hand", order_id, str(len(clips)))
+        self._tell(order_id, delivered=True)
+
     def _tell(self, order_id: str, *, delivered: bool) -> None:
         """Notify the customer. Never allowed to undo the job's outcome: the
         film exists either way, and a bounced address must not turn a delivered
