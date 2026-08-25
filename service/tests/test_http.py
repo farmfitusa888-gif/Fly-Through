@@ -837,3 +837,111 @@ def test_a_referral_survives_the_hop_through_sign_in(client, app):
     from flythrough_service import reseller
     assert reseller.ledger(app.state.db, rid,
                            payout_minimum_cents=0).lifetime_cents == 6225
+
+
+# ------------------------------------------------------ disclosure page
+
+
+def _deliver_rooms_order(client, app, *, vertical_sku="re-listing-pro",
+                         write_page=True):
+    from flythrough_service import orders, render
+    sign_in(client, app, "agent@example.com")
+    oid = start_order(client, vertical_sku)
+    csrf = csrf_of(client, app, f"/order/{oid}")
+    client.post(f"/order/{oid}/upload", data={"csrf": csrf}, files=[
+        ("files", (f"{i:02d}_{n}.jpg", io.BytesIO(JPEG + bytes([i])), "image/jpeg"))
+        for i, n in enumerate(["front-elevation", "foyer", "kitchen", "patio"], 1)])
+    client.post(f"/order/{oid}/brief", data={
+        "q0": "1420 Cedar Ridge Rd", "q1": "Cedar Realty", "q2": "daylight",
+        "csrf": csrf})
+    _pay(client, oid)
+    if write_page:
+        d = render.output_dir(app.state.settings.data_dir, oid) / "delivery"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "originals.html").write_text(
+            "<h1>1420 Cedar Ridge Rd</h1>"
+            f'<img src="/o/{oid}/originals/01_exterior.jpg">')
+        og = render.output_dir(app.state.settings.data_dir, oid) / "originals"
+        og.mkdir(parents=True, exist_ok=True)
+        (og / "01_exterior.jpg").write_bytes(JPEG)
+    app.state.worker.run_one()
+    return oid
+
+
+def test_the_disclosure_page_publishes_itself_on_delivery(client, app):
+    """It was a manual step. For a self-serve product that means every order
+    ships without the artefact the statute requires a link to."""
+    oid = _deliver_rooms_order(client, app)
+    client.cookies.clear()                       # a regulator is not logged in
+    r = client.get(f"/o/{oid}/originals")
+    assert r.status_code == 200 and "Cedar Ridge" in r.text
+
+
+def test_the_originals_themselves_are_reachable(client, app):
+    oid = _deliver_rooms_order(client, app)
+    client.cookies.clear()
+    r = client.get(f"/o/{oid}/originals/01_exterior.jpg")
+    assert r.status_code == 200 and r.content == JPEG
+
+
+def test_no_disclosure_page_before_delivery(client, app):
+    """Publishing an address for an order nobody paid for is worse than late."""
+    sign_in(client, app)
+    oid = start_order(client)
+    assert client.get(f"/o/{oid}/originals").status_code == 404
+
+
+def test_vehicles_do_not_publish_anyones_photographs(client, app):
+    """No altered-image duty, so no reason to make a stranger's photos public."""
+    from flythrough_service import orders
+    sign_in(client, app)
+    oid = start_order(client, "veh-ad-premium")
+    with app.state.db.tx() as c:
+        orders.transition(c, app.state.db, oid, "awaiting_payment")
+        orders.transition(c, app.state.db, oid, "paid")
+        orders.transition(c, app.state.db, oid, "rendering")
+        orders.transition(c, app.state.db, oid, "delivered")
+    assert client.get(f"/o/{oid}/originals").status_code == 404
+
+
+# "." and ".." are deliberately absent: every conformant client collapses them
+# before the request is sent, so they resolve to the parent route and correctly
+# return the disclosure page. The cases below are the ones that actually arrive
+# at the handler as a segment.
+@pytest.mark.parametrize("name", [
+    "../../../../etc/passwd",
+    "..%2f..%2fetc%2fpasswd",
+    "....//....//etc/passwd",
+    "sub/dir.jpg",
+    "%2e%2e%2fpasswd",
+    "01_exterior.jpg/../../../../etc/passwd",
+])
+def test_the_originals_route_is_not_a_file_read_primitive(client, app, name):
+    """A public route that joins a user-supplied name onto a path is exactly how
+    one becomes an arbitrary file read."""
+    oid = _deliver_rooms_order(client, app)
+    client.cookies.clear()
+    r = client.get(f"/o/{oid}/originals/{name}")
+    assert r.status_code == 404
+    assert b"root:" not in r.content
+
+
+def test_the_disclosure_url_is_fixed_before_the_render(tmp_path, monkeypatch):
+    """It is burned into the QR and the caption, so it cannot be filled in
+    afterwards."""
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", SECRET)
+    monkeypatch.setenv("FLYTHROUGH_SECRET_KEY", "k")
+    s = load(data_dir=tmp_path, dev=True)
+    seen = {}
+
+    def renderer(*, out_dir, slug, originals_url, order_id, **kw):
+        seen["url"] = originals_url
+        m = Path(out_dir) / f"{slug}.mp4"
+        m.write_bytes(b"v")
+        return [("master", m)]
+
+    app = create_app(s, renderer=renderer)
+    c = TestClient(app)
+    oid = _deliver_rooms_order(c, app, write_page=False)
+    assert seen["url"].endswith(f"/o/{oid}/originals")
+    assert seen["url"].startswith("http")

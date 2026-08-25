@@ -45,7 +45,7 @@ REFERRAL_COOKIE = "ft_ref"
 
 
 def default_renderer(*, order_id, vertical, slug, originals, out_dir, brief,
-                     placement):
+                     placement, originals_url=""):
     """The real renderer: pipeline.plan_runner, unchanged.
 
     Imported lazily so the web app starts on a machine with no ffmpeg. The
@@ -67,7 +67,8 @@ def default_renderer(*, order_id, vertical, slug, originals, out_dir, brief,
     submit, poll = provider_from_env()
     return render_order(vertical=vertical, slug=slug, originals=Path(originals),
                         out_dir=Path(out_dir), brief=brief, placement=placement,
-                        submit=submit, poll=poll)
+                        submit=submit, poll=poll,
+                        originals_url=originals_url)
 
 
 def provider_from_env():
@@ -929,6 +930,50 @@ def create_app(settings: Settings | None = None, *, renderer=None,
                 f'<button>Ask the {pending} due</button></form>'
                 f'<p class="note"><a href="/admin/payouts">Partner payouts →</a></p>')
         return render_page(request, "Queue", body)
+
+    @app.get("/o/{order_id}/originals", response_class=HTMLResponse)
+    def originals_page(request: Request, order_id: str):
+        """The artefact Bus. & Prof. Code s.10140.8 requires a link TO.
+
+        Public and unauthenticated on purpose: a disclosure link a regulator or
+        a buyer cannot open is not a disclosure. It carries the address and the
+        photographs, and nothing about the customer as a person.
+
+        Only for verticals that carry the duty. A vehicle or product order has
+        no altered-image rule to satisfy and gets a 404 rather than publishing
+        someone's photographs for no reason.
+        """
+        o = orders.get(db, order_id)
+        if o is None or o["vertical"] != "rooms":
+            return Response("Not found", status_code=404)
+        if o["status"] not in ("delivered", "refunded"):
+            # Before delivery there is nothing to disclose, and publishing an
+            # address for an order that was never paid for would be worse.
+            return Response("Not found", status_code=404)
+        page_path = render.output_dir(s.data_dir, order_id) / "delivery" / "originals.html"
+        if not page_path.is_file():
+            return Response("Not found", status_code=404)
+        return HTMLResponse(page_path.read_text())
+
+    @app.get("/o/{order_id}/originals/{name}")
+    def originals_file(request: Request, order_id: str, name: str):
+        o = orders.get(db, order_id)
+        if o is None or o["vertical"] != "rooms" or o["status"] not in (
+                "delivered", "refunded"):
+            return Response("Not found", status_code=404)
+        # A public route that joins a user-supplied name onto a path is exactly
+        # how one becomes an arbitrary file read. Two independent checks,
+        # because the first alone was only safe by accident: Path("..").name is
+        # ".." , not "", and it passed the basename test -- it was the later
+        # is_file() on a directory that happened to stop it.
+        root = (render.output_dir(s.data_dir, order_id) / "originals").resolve()
+        if name != Path(name).name or name in ("", ".", "..") or "%" in name:
+            return Response("Not found", status_code=404)
+        f = (root / name).resolve()
+        # The decisive check: wherever the join landed, it must be inside root.
+        if not f.is_file() or root not in f.parents:
+            return Response("Not found", status_code=404)
+        return FileResponse(f)
 
     @app.get("/healthz")
     def healthz():

@@ -34,7 +34,7 @@ class Renderer(Protocol):
 
     def __call__(self, *, order_id: str, vertical: str, slug: str,
                  originals: Path, out_dir: Path, brief: dict,
-                 placement: str) -> list[tuple[str, Path]]:
+                 placement: str, originals_url: str) -> list[tuple[str, Path]]:
         """Returns [(kind, path)] -- master, vertical, thumb, disclosure."""
 
 
@@ -155,10 +155,18 @@ class Worker:
         out_dir = render.output_dir(self.data_dir, order_id) / "delivery"
         out_dir.mkdir(parents=True, exist_ok=True)
 
+        # The disclosure URL has to be known BEFORE the render: it is burned
+        # into the QR code and the caption, so it cannot be filled in after.
+        # The order id is already unguessable, so the address is stable from the
+        # moment the order exists.
+        base = getattr(self.settings, "base_url", "") if self.settings else ""
+        originals_url = f"{base}/o/{order_id}/originals" if base else ""
+
         produced = self.renderer(
             order_id=order_id, vertical=o["vertical"], slug=slug,
             originals=originals, out_dir=out_dir, brief=brief,
-            placement=render.placement_for(o["vertical"]))
+            placement=render.placement_for(o["vertical"]),
+            originals_url=originals_url)
 
         with self.db.tx() as c:
             for kind, path in produced:
