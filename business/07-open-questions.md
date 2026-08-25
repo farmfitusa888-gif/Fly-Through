@@ -68,6 +68,14 @@ so our relative advantage should be largest.
 
 ## Deliberately not pursued
 
+- **A second render provider, for now.** Closed 2026-08-25 and written up in
+  `12-render-provider.md`. OpenArt has no REST API, so the server cannot call
+  it — but the operator can, and the render sheet in
+  `service/flythrough_service/manual.py` lets an order be worked end to end on
+  the account that already exists. Automatic rendering is a throughput fix, not
+  a prerequisite for revenue. The triggers for revisiting it are written down;
+  the adapter and the fal payload are already built for the day one fires.
+
 - **True 3D / Gaussian splatting.** Better product, far longer path to revenue.
   Revisit at Phase 3+.
 - **Interior virtual staging.** Lucrative and adjacent, but it would destroy the

@@ -18,6 +18,7 @@ not-legal-advice line where a reader will actually see it.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -71,6 +72,42 @@ FONTS = ('<link rel="preconnect" href="https://fonts.googleapis.com">'
          '&display=swap">')
 
 
+# Articles may not type a price. The same rule the landing page follows, for the
+# same reason: a number written into prose goes stale silently, and an article
+# is the last place anyone looks when the model changes. These tokens are
+# substituted at build time from the catalogue.
+#
+#   {{price:re-listing-pro}}    what the customer pays
+#   {{render:re-listing-pro}}   what the render costs us
+#   {{fees:re-listing-pro}}     card processing on that sale
+#   {{direct:re-listing-pro}}   render + fees
+#   {{seconds:re-listing-pro}}  finished runtime
+TOKEN = re.compile(r"\{\{(price|render|fees|direct|seconds):([a-z0-9-]+)\}\}")
+
+PAYMENT_PCT, PAYMENT_FLAT = 0.029, 0.30
+
+
+def _figures(sku_id: str) -> dict:
+    sys.path.insert(0, str(HERE.parent / "model"))
+    sys.path.insert(0, str(HERE.parent / "pipeline"))
+    from catalog import BY_ID
+    from flythrough.cost import usd_per_second
+
+    sku = BY_ID.get(sku_id)
+    if sku is None:
+        raise KeyError(f"unknown sku {sku_id!r} referenced in an article")
+    seconds = sku.seconds * sku.quantity
+    render = seconds * usd_per_second("wan2-7", "1080p")
+    fees = sku.price * PAYMENT_PCT + PAYMENT_FLAT
+    return {"price": f"${sku.price:,.0f}", "render": f"${render:,.2f}",
+            "fees": f"${fees:,.2f}", "direct": f"${render + fees:,.2f}",
+            "seconds": str(seconds)}
+
+
+def substitute(text: str) -> str:
+    return TOKEN.sub(lambda m: _figures(m.group(2))[m.group(1)], text)
+
+
 def parse(path: Path) -> dict:
     raw = path.read_text()
     if "\n---\n" not in raw:
@@ -85,6 +122,11 @@ def parse(path: Path) -> dict:
     for required in ("title", "slug", "description", "updated"):
         if required not in meta:
             raise ValueError(f"{path.name}: front matter is missing {required!r}")
+    # Titles and descriptions may carry the same tokens the body does. Slugs may
+    # not: a URL that moves when a price moves is a broken link on somebody
+    # else's blog, so the slug stays whatever it was the day it was published.
+    for field in ("title", "description"):
+        meta[field] = substitute(meta[field])
     meta["body"] = body
     return meta
 
@@ -118,7 +160,7 @@ def main() -> int:
     for path in sorted(SRC.glob("*.md")):
         meta = parse(path)
         md.reset()
-        html = md.convert(meta["body"])
+        html = md.convert(substitute(meta["body"]))
         out = DIST / meta["slug"] / "index.html"
         out.parent.mkdir(parents=True, exist_ok=True)
         page = (

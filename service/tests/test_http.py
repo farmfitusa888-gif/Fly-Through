@@ -1149,17 +1149,44 @@ def test_an_unpaid_order_has_no_render_sheet(client, app):
     assert "Not ready" in client.get(f"/admin/order/{oid}").text
 
 
-def test_uploading_clips_delivers_the_order(client, app, tmp_path):
-    """The manual route must end in the same place as the automatic one."""
+def _clips_for(app, oid, tmp_path, *, seconds=None):
+    """Clips as long as the plan calls for, unless a test wants them short."""
     import subprocess
-    oid = _ready_paid_order(client, app)
-    clips = []
-    for i in range(1, 4):
+    from flythrough_service import manual
+    brief = manual.build(app.state.db, app.state.settings.data_dir, oid)
+    each = (seconds if seconds is not None
+            else brief.total_seconds / len(brief.shots))
+    out = []
+    for i in range(1, len(brief.shots) + 1):
         f = tmp_path / f"shot_{i:02d}.mp4"
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
-                        "-i", f"testsrc2=s=320x180:d=1:r=30", "-c:v", "libx264",
-                        "-pix_fmt", "yuv420p", str(f)], check=True)
-        clips.append(f)
+                        "-i", f"testsrc2=s=320x180:d={each}:r=30", "-c:v",
+                        "libx264", "-pix_fmt", "yuv420p", str(f)], check=True)
+        out.append(f)
+    return out
+
+
+def test_a_short_render_is_refused_rather_than_delivered(client, app, tmp_path):
+    """A real delivery went out at 8 seconds against a 24-second order because
+    the operator's clips came back a third of the length asked for. The film
+    assembled cleanly -- there is nothing wrong with cutting four short clips
+    together -- so nothing caught it until someone watched the result. The
+    customer bought a runtime; something has to check they got one."""
+    oid = _ready_paid_order(client, app)
+    clips = _clips_for(app, oid, tmp_path, seconds=1)
+    csrf = csrf_of(client, app, f"/admin/order/{oid}")
+    r = client.post(f"/admin/order/{oid}/clips", data={"csrf": csrf},
+                    files=[("files", (c.name, c.read_bytes(), "video/mp4"))
+                           for c in clips], follow_redirects=False)
+    assert "err=" in r.headers["location"]
+    from flythrough_service import orders
+    assert orders.get(app.state.db, oid)["status"] != "delivered"
+
+
+def test_uploading_clips_delivers_the_order(client, app, tmp_path):
+    """The manual route must end in the same place as the automatic one."""
+    oid = _ready_paid_order(client, app)
+    clips = _clips_for(app, oid, tmp_path)
     csrf = csrf_of(client, app, f"/admin/order/{oid}")
     r = client.post(f"/admin/order/{oid}/clips", data={"csrf": csrf},
                     files=[("files", (c.name, c.read_bytes(), "video/mp4"))
@@ -1172,6 +1199,32 @@ def test_uploading_clips_delivers_the_order(client, app, tmp_path):
     assert "master" in kinds
     assert any("your film is ready" in m.subject
                for m in app.state.mailer.outbox() if m.to == "agent@example.com")
+
+
+def test_delivery_does_not_block_the_event_loop(client, app, monkeypatch):
+    """Assembly is ffmpeg, and ffmpeg on a real four-clip order took 67 seconds.
+    Run inline in an async route that does not merely hang the operator's tab --
+    it stops the process answering anything at all, so checkout, magic links and
+    Stripe's webhook all time out while one film encodes. It has to go to a
+    thread, and the cheapest proof of that is that no event loop is running
+    where the work happens."""
+    import asyncio
+    oid = _ready_paid_order(client, app)
+    seen = {}
+
+    def stub(order_id, clips):
+        try:
+            asyncio.get_running_loop()
+            seen["on_loop"] = True
+        except RuntimeError:
+            seen["on_loop"] = False
+
+    monkeypatch.setattr(app.state.worker, "deliver_manual", stub)
+    csrf = csrf_of(client, app, f"/admin/order/{oid}")
+    client.post(f"/admin/order/{oid}/clips", data={"csrf": csrf},
+                files=[("files", ("shot_01.mp4", b"x" * 64, "video/mp4"))],
+                follow_redirects=False)
+    assert seen.get("on_loop") is False, "assembly ran on the event loop"
 
 
 def test_delivering_with_no_clips_is_refused(client, app):

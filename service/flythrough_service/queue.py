@@ -22,6 +22,9 @@ from typing import Callable, Protocol
 from . import notify, orders, render
 from .db import Database, new_id, now
 
+# A delivery this far under the runtime the customer bought is a short
+# render, not a tight edit. Below it the operator is stopped and told.
+SHORT_DELIVERY = 0.75
 MAX_ATTEMPTS = 3
 
 
@@ -197,6 +200,21 @@ class Worker:
             if o["status"] == "paid":
                 orders.transition(c, self.db, order_id, "rendering")
 
+        # What the customer bought, against what the operator actually rendered.
+        # A real delivery caught this the hard way: four clips came back at 2s
+        # each instead of 6, the film assembled cleanly, and a 24-second order
+        # went out as 8 seconds with nothing anywhere saying so. The pipeline
+        # was right -- it cut what it was handed. Nobody was checking that what
+        # it was handed was the film.
+        from flythrough.assemble import probe_duration
+        planned = self._planned_seconds(order_id)
+        if planned:
+            got = sum(probe_duration(p) for p in clips)
+            if got < planned * SHORT_DELIVERY:
+                raise RuntimeError(
+                    f"these clips come to {got:.0f}s and the order is for "
+                    f"{planned}s — re-render the short ones before delivering")
+
         out = render.output_dir(self.data_dir, order_id) / "delivery"
         out.mkdir(parents=True, exist_ok=True)
         slug = render.slug_for(order_id, json.loads(o["brief"] or "{}"))
@@ -225,6 +243,17 @@ class Worker:
             orders.transition(c, self.db, order_id, "delivered")
             self.db.log(c, "job.delivered_by_hand", order_id, str(len(clips)))
         self._tell(order_id, delivered=True)
+
+    def _planned_seconds(self, order_id: str) -> int:
+        """Runtime the plan calls for, or 0 if it cannot be worked out. A
+        planner that will not build is not a reason to block a delivery -- the
+        gate above is a guard against a short render, not a second gate on
+        whether the order is renderable at all."""
+        try:
+            from . import manual
+            return manual.build(self.db, self.data_dir, order_id).total_seconds
+        except Exception:                                     # noqa: BLE001
+            return 0
 
     def _tell(self, order_id: str, *, delivered: bool) -> None:
         """Notify the customer. Never allowed to undo the job's outcome: the

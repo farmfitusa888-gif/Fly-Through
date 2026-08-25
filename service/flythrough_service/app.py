@@ -30,6 +30,7 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, FileResponse
+from starlette.concurrency import run_in_threadpool
 
 from . import (auth, catalog_bridge as cat, limits, manual, notify, orders,
                outcomes, payments, render, reseller)
@@ -1095,7 +1096,13 @@ def create_app(settings: Settings | None = None, *, renderer=None,
                 f"/admin/order/{order_id}?err={quote('no video files in that upload')}",
                 303)
         try:
-            worker.deliver_manual(order_id, saved)
+            # ffmpeg, off the event loop. Assembling a five-shot film takes the
+            # better part of a minute; run inline in an async route it does not
+            # just hang the operator's tab, it stops the whole process answering
+            # anything -- checkout, magic links, Stripe's webhook -- until the
+            # last encode lands. Measured at 67s on a real four-clip delivery,
+            # during which /healthz timed out.
+            await run_in_threadpool(worker.deliver_manual, order_id, saved)
         except Exception as exc:                              # noqa: BLE001
             return RedirectResponse(
                 f"/admin/order/{order_id}?err={quote(str(exc)[:160])}", 303)
