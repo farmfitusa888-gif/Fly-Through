@@ -275,9 +275,14 @@ def test_the_portal_never_asks_for_a_photo_link():
 
 
 def test_a_fresh_order_is_not_ready(db, customer):
+    """The requirement comes from the SKU, not a flat floor. Every shot is
+    anchored between two photographs, so a 42-second film over 8 beats needs
+    nine of them -- and asking before payment is the only cheap time to ask."""
+    from flythrough_service import catalog_bridge as cat
     o = orders.create(db, customer, "re-listing-pro")
     r = orders.readiness(db, o)
-    assert not r.ok and r.photos == 0 and r.required == 4
+    assert not r.ok and r.photos == 0
+    assert r.required == cat.skus()["re-listing-pro"].beats + 1 == 9
 
 
 def test_illegal_transitions_are_refused(db, customer):
@@ -923,3 +928,31 @@ def test_a_refunded_order_is_not_counted_as_waiting_forever(db, customer):
     _order(db, customer, "re-listing-pro", paid=t0, delivered=None,
            status="refunded")
     assert turnaround.measure(db, at=t0 + 99 * 3600).waiting == 0
+
+
+def test_every_sku_asks_for_enough_photographs_to_keep_its_promise():
+    """The runtime on the sales page is a promise: "one property, 42 seconds"
+    sits next to the price. N photographs make N-1 anchored shots and there is
+    no other way to reach a runtime, so the upload gate has to be derived from
+    the SKU rather than a flat 4."""
+    from flythrough_service import catalog_bridge as cat
+    for s in cat.skus().values():
+        assert cat.required_photos(s.id) >= s.beats + 1, s.id
+
+
+def test_the_catalogue_tempo_reproduces_the_runtime_it_sells():
+    """seconds and beats came from the pricing model; tempo was added later.
+    If they disagree the catalogue is selling a film the planner cannot build,
+    which is exactly the bug this whole change exists to close."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pipeline"))
+    from flythrough.moves import MOVES, at_tempo
+    from flythrough_service import catalog_bridge as cat
+
+    for s in cat.skus().values():
+        lengths = {at_tempo(m, s.tempo).seconds for m in MOVES.values()}
+        lo, hi = min(lengths) * s.beats, max(lengths) * s.beats
+        assert lo <= s.seconds <= hi, (
+            f"{s.id}: sold as {s.seconds}s over {s.beats} beats at {s.tempo} "
+            f"tempo, which can only produce {lo}-{hi}s")

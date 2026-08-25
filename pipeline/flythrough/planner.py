@@ -69,6 +69,8 @@ class Plan:
     style: str
     resolution: str
     aspect: str
+    tempo: str = "tour"
+    vertical: str = "rooms"
     shots: list[Shot] = field(default_factory=list)
     photos: list[Photo] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -84,6 +86,8 @@ class Plan:
             "style": self.style,
             "resolution": self.resolution,
             "aspect": self.aspect,
+            "tempo": self.tempo,
+            "vertical": self.vertical,
             "total_seconds": self.total_seconds,
             "shot_count": len(self.shots),
             "hero_frame": self.hero_frame,
@@ -233,6 +237,7 @@ def build_plan(
     aspect: str = "16:9",
     max_seconds: int | None = None,
     vertical: str = "rooms",
+    tempo: str = "tour",
 ) -> Plan:
     """Build a complete shot plan from a photo folder.
 
@@ -242,12 +247,19 @@ def build_plan(
     meant every vertical planned as a house -- a vehicle order rendered with
     "camera orbits the house" and a negative bank that suppressed cars.
 
+    `tempo` re-times every move. A tour is 5-6 second takes; an advert is 2-3.
+    It is what separates the 42-second listing film and the 16-second Ferrari
+    advert built from the same machinery, and leaving it out is why the render
+    sheet quoted 21 seconds for a SKU sold as 16.
+
     max_seconds caps total runtime by dropping the lowest-value transitions
     (hallways and duplicate rooms first), never by truncating the tour, so the
     opener and closer always survive a budget cap.
     """
     if style not in mv.STYLES:
         raise ValueError(f"unknown style {style!r}; choose from {sorted(mv.STYLES)}")
+    if tempo not in mv.TEMPO:
+        raise ValueError(f"unknown tempo {tempo!r}; choose from {sorted(mv.TEMPO)}")
     spec = tx.of(vertical)
 
     photos = order_photos(load_photos(folder, spec))
@@ -256,20 +268,23 @@ def build_plan(
         style=style,
         resolution=resolution,
         aspect=aspect,
+        tempo=tempo,
+        vertical=vertical,
         photos=photos,
         warnings=_audit(photos, spec),
         hero_frame=_pick_hero(photos, spec),
     )
 
     if max_seconds is not None:
-        photos = _trim(photos, max_seconds, spec)
+        photos = _trim(photos, max_seconds, spec, tempo)
         plan.photos = photos
     pairs = list(zip(photos, photos[1:]))
 
     style_text = mv.STYLES[style]
     for i, (a, b) in enumerate(pairs):
-        move = mv.select(a.room, b.room, index=i, total=len(pairs),
-                         alternate_orbit=spec.alternate_orbit)
+        move = mv.at_tempo(
+            mv.select(a.room, b.room, index=i, total=len(pairs),
+                      alternate_orbit=spec.alternate_orbit), tempo)
         plan.shots.append(
             Shot(
                 index=i,
@@ -292,12 +307,13 @@ def build_plan(
     return plan
 
 
-def _runtime(photos: list[Photo], spec: tx.Spec | None = None) -> int:
-    """Total seconds a photo chain will render to."""
+def _runtime(photos: list[Photo], spec: tx.Spec | None = None,
+             tempo: str = "tour") -> int:
+    """Total seconds a photo chain will render to, at this tempo."""
     spec = spec or tx.of("rooms")
     return sum(
-        mv.select(a.room, b.room, index=i, total=len(photos) - 1,
-                  alternate_orbit=spec.alternate_orbit).seconds
+        mv.at_tempo(mv.select(a.room, b.room, index=i, total=len(photos) - 1,
+                              alternate_orbit=spec.alternate_orbit), tempo).seconds
         for i, (a, b) in enumerate(zip(photos, photos[1:]))
     )
 
@@ -333,7 +349,7 @@ def _drop_value(photos: list[Photo], i: int, spec: tx.Spec | None = None) -> int
 
 
 def _trim(photos: list[Photo], max_seconds: int,
-          spec: tx.Spec | None = None) -> list[Photo]:
+          spec: tx.Spec | None = None, tempo: str = "tour") -> list[Photo]:
     """Reduce the photo chain until it renders within max_seconds.
 
     Returns a contiguous chain -- every consecutive pair is still a real
@@ -341,7 +357,7 @@ def _trim(photos: list[Photo], max_seconds: int,
     """
     spec = spec or tx.of("rooms")
     kept = list(photos)
-    while len(kept) > 2 and _runtime(kept, spec) > max_seconds:
+    while len(kept) > 2 and _runtime(kept, spec, tempo) > max_seconds:
         ranked = [(_drop_value(kept, i, spec), i) for i in range(len(kept))]
         value, idx = max(ranked)
         if value == 0:

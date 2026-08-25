@@ -48,6 +48,15 @@ def intake_for(vertical: str) -> list[str]:
 
 
 def required_photos(sku_id: str) -> int:
-    """Floor below which the pipeline cannot build a watchable film. Mirrors the
-    planner's own audit so a customer is told at UPLOAD time, not after paying."""
-    return 4 if get(sku_id).vertical == "rooms" else 3
+    """How many photographs this SKU's runtime actually needs.
+
+    Every shot is anchored between two real photographs, so N photos make N-1
+    shots and there is no other way to reach a runtime. This used to return a
+    flat 4 or 3, which let someone buy a 42-second film with four pictures and
+    find out at the render sheet that it plans to fifteen seconds. Asking for
+    the ninth photo before payment costs nothing; discovering it afterwards
+    costs a refund or a broken promise.
+    """
+    s = get(sku_id)
+    floor = 4 if s.vertical == "rooms" else 3
+    return max(floor, s.beats + 1)

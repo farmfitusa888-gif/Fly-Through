@@ -56,6 +56,7 @@ def render_order(
     style: str | None = None,
     max_seconds: int | None = None,
     originals_url: str = "",
+    tempo: str = "tour",
 ) -> list[tuple[str, Path]]:
     """Render and deliver one order. Returns [(kind, path)].
 
@@ -80,7 +81,7 @@ def render_order(
 
     chosen = style or _style_from_brief(brief) or DEFAULT_STYLE[vertical]
     plan = build_plan(originals, listing=listing, style=chosen,
-                      max_seconds=max_seconds, vertical=vertical)
+                      max_seconds=max_seconds, vertical=vertical, tempo=tempo)
 
     jobs = build_jobs(plan, adapter or OpenArtAdapter())
     urls = submit_all(jobs, submit=submit, poll=poll)

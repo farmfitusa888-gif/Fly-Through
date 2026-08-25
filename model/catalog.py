@@ -89,6 +89,12 @@ class Sku:
     vertical: str             # rooms | vehicles | products
     turnaround: str
     seconds: int              # rendered runtime, for the cost floor
+    beats: int                # anchored shots the runtime is made of
+    # How fast the cut moves -- moves.TEMPO. This is not decoration: it is the
+    # difference between the 42-second film a listing was sold and the
+    # 16-second advert a Ferrari was sold, out of the same machinery. It lived
+    # only in prose until the planner quoted 21s for a 16s SKU.
+    tempo: str = "tour"
     quantity: int = 1         # units covered by one purchase
     blurb: str = ""
     tags: tuple[str, ...] = field(default_factory=tuple)
@@ -125,14 +131,15 @@ def _plan(name: str):
 # ---------------------------------------------------------------- real estate
 _re = [
     Sku(f"re-{t.name.lower().replace(' ', '-')}", t.name, t.price, "one-time",
-        "rooms", "24 hours", t.runtime_s,
+        "rooms", "24 hours", t.runtime_s, t.shots, "tour",
         blurb=t.note,
         tags=("disclosure pack included",) + (("9:16 vertical",) if t.vertical else ()))
     for t in TIERS
 ]
 _re.append(Sku("re-retainer", f"{RETAINER_LISTINGS} listings a month",
                RETAINER_PRICE, "recurring", "rooms", "24 hours each",
-               _tier("Listing Pro").runtime_s, quantity=RETAINER_LISTINGS,
+               _tier("Listing Pro").runtime_s, _tier("Listing Pro").shots,
+               "tour", quantity=RETAINER_LISTINGS,
                blurb="For agents who list every week. One invoice, no per-job approval.",
                tags=("cancel any time",)))
 
@@ -141,22 +148,30 @@ _re.append(Sku("re-retainer", f"{RETAINER_LISTINGS} listings a month",
 # checkout -- see WALKAROUND_MIN_UNITS in ad_pricing. The smallest walkaround
 # anyone can buy on its own is three.
 _veh = [
+    # Tempo comes straight out of the arithmetic already in ad_pricing: a
+    # walkaround is 20s over 7 beats (2.9s each, the "ad" band) and an ad cut is
+    # 16s over 8 (2.0s, "hype"). It was never a separate opinion.
     Sku("veh-walkaround-3", _product("Walkaround x3").name, 117.0,
-        "one-time", "vehicles", "24 hours", 20, quantity=3,
+        "one-time", "vehicles", "24 hours", 20,
+        _product("Walkaround x3").beats, "ad", quantity=3,
         blurb=_product("Walkaround x3").note),
     Sku("veh-ad-mainstream", "Ad cut - mainstream", 149.0, "one-time",
-        "vehicles", "24 hours", 15,
+        # "ad", not "hype": 15s over 7 beats is 2.14s each, and hype floors
+        # every beat at exactly 2. brief.TRUCK reaches the same answer from the
+        # other direction -- a work truck is sold steadier than an exotic.
+        "vehicles", "24 hours", 15, _product("Ad cut - mainstream").beats, "ad",
         blurb=_product("Ad cut - mainstream").note),
     Sku("veh-ad-premium", "Ad cut - premium", 249.0, "one-time",
-        "vehicles", "24 hours", 16,
+        "vehicles", "24 hours", 16, _product("Ad cut - premium").beats, "hype",
         blurb=_product("Ad cut - premium").note),
     Sku("veh-launch", "Launch package", 399.0, "one-time",
-        "vehicles", "48 hours", 16,
+        "vehicles", "48 hours", 16, _product("Launch package").beats, "hype",
         blurb=_product("Launch package").note),
 ]
 _veh += [
     Sku(f"lot-{p.units}", f"{p.units} walkarounds a month", p.price,
-        "recurring", "vehicles", "weekly batch", 20, quantity=p.units,
+        "recurring", "vehicles", "weekly batch", 20,
+        _product("Walkaround (per VIN)").beats, "ad", quantity=p.units,
         blurb=f"Every unit on the lot, {p.per_unit:.0f} dollars a vehicle.",
         tags=("cancel any time",))
     for p in LOT_PLANS
@@ -168,10 +183,10 @@ _veh += [
 # sale yet; the first product customer is allowed to move these numbers.
 _prod = [
     Sku("prod-single", "Product cut", 149.0, "one-time", "products",
-        "24 hours", 18,
+        "24 hours", 18, 9, "hype",
         blurb="One product, one film. Hero, detail, material, scale."),
     Sku("prod-three", "Product cut x3", 349.0, "one-time", "products",
-        "48 hours", 18, quantity=3,
+        "48 hours", 18, 9, "hype", quantity=3,
         blurb="Three products in one batch, or one product in three lengths."),
 ]
 

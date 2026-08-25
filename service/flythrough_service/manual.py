@@ -31,7 +31,7 @@ from flythrough import providers                       # noqa: E402
 from flythrough.cost import USD_PER_CREDIT, quote, rate  # noqa: E402
 from flythrough.planner import build_plan              # noqa: E402
 
-from . import orders, render                            # noqa: E402
+from . import catalog_bridge as cat, orders, render     # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -55,6 +55,11 @@ class Brief:
     duration_field: str = "duration"
     duration_min: int = 0
     duration_max: int = 0
+    # What the customer bought, as distinct from what this photo set plans to.
+    # They are the same number when the shoot is complete and different when it
+    # is not, and the sheet has to show both.
+    sold_seconds: int = 0
+    tempo: str = "tour"
 
 
 def _settings(profile: dict, seconds: int, tier: str) -> list[dict]:
@@ -80,6 +85,12 @@ def _settings(profile: dict, seconds: int, tier: str) -> list[dict]:
         out.append({"field": key, "value": value, "default": default,
                     "differs": default is not None and default != value})
     return out
+
+
+# A plan this far under the runtime the SKU sells is a shoot that is missing
+# photographs, not a tighter cut. Matches queue.SHORT_DELIVERY on purpose: the
+# same promise, checked before the credits and again before the delivery.
+SHORT_PLAN = 0.75
 
 
 class NotReady(Exception):
@@ -116,10 +127,35 @@ def build(db, data_dir: Path, order_id: str, *, model: str = "wan2-7",
                or brief_answers.get("Product name") or order_id)
     style = _style(o["vertical"], brief_answers)
 
+    # The SKU is what was sold, so the SKU decides the film: its runtime is the
+    # cap and its tempo is the cut. Without this the planner answered a
+    # different question from the one the customer paid -- a Ferrari advert sold
+    # as 16 seconds planned as 21, at tour pacing, and the render sheet printed
+    # the planner's number as the one to render.
+    sku = cat.skus().get(o["sku"])
     plan = build_plan(originals, listing=listing, style=style,
-                      vertical=o["vertical"])
+                      vertical=o["vertical"],
+                      tempo=(sku.tempo if sku else "tour"),
+                      max_seconds=(sku.seconds if sku else None))
     q = quote(seconds=plan.total_seconds, shots=len(plan.shots),
               model=model, tier=tier)
+
+    # Trimming can only ever shorten. If the photographs cannot reach the
+    # runtime that was sold, no cap fixes it -- every shot is anchored between
+    # two real photographs, so runtime is bounded by how many were sent. Saying
+    # so here is the difference between asking for one more photo and
+    # delivering a film that is half the length of the one on the invoice.
+    sold = sku.seconds if sku else 0
+    shortfall = ""
+    if sold and plan.total_seconds < sold * SHORT_PLAN:
+        need = -(-(sold - plan.total_seconds) // max(
+            1, plan.total_seconds // max(1, len(plan.shots))))
+        shortfall = (
+            f"This plan runs {plan.total_seconds}s and the order was sold as "
+            f"{sold}s. Every shot is anchored between two real photographs, so "
+            f"the only fix is more of them — roughly {need} more. Ask "
+            f"before rendering; a short film is a broken promise, not a tight "
+            f"edit.")
 
     try:
         profile = providers.load(model, "image2video")
@@ -146,10 +182,12 @@ def build(db, data_dir: Path, order_id: str, *, model: str = "wan2-7",
     dur = (profile.get("fields", {}) or {}).get("duration", {})
     return Brief(
         order_id=order_id, listing=listing, style=style, shots=shots,
-        warnings=tuple(plan.warnings) + prep.warnings, blocks=prep.blocks,
+        warnings=tuple(plan.warnings) + prep.warnings,
+        blocks=prep.blocks + ((shortfall,) if shortfall else ()),
         total_seconds=plan.total_seconds,
         credits=q.expected_credits, usd=q.expected_usd,
         originals_dir=originals, model=model, tier=tier,
+        sold_seconds=sold, tempo=plan.tempo,
         duration_min=int(dur.get("minimum", 0)),
         duration_max=int(dur.get("maximum", 0)))
 

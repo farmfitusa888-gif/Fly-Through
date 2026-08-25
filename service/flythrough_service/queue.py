@@ -165,10 +165,17 @@ class Worker:
         base = getattr(self.settings, "base_url", "") if self.settings else ""
         originals_url = f"{base}/o/{order_id}/originals" if base else ""
 
+        # The SKU decides the film here too. A renderer that plans at its own
+        # default while the render sheet plans at the SKU's would make the
+        # automatic path and the manual path two different products.
+        from . import catalog_bridge as cat
+        sku = cat.skus().get(o["sku"])
         produced = self.renderer(
             order_id=order_id, vertical=o["vertical"], slug=slug,
             originals=originals, out_dir=out_dir, brief=brief,
             placement=render.placement_for(o["vertical"]),
+            tempo=(sku.tempo if sku else "tour"),
+            max_seconds=(sku.seconds if sku else None),
             originals_url=originals_url)
 
         with self.db.tx() as c:
@@ -245,10 +252,26 @@ class Worker:
         self._tell(order_id, delivered=True)
 
     def _planned_seconds(self, order_id: str) -> int:
-        """Runtime the plan calls for, or 0 if it cannot be worked out. A
-        planner that will not build is not a reason to block a delivery -- the
-        gate above is a guard against a short render, not a second gate on
-        whether the order is renderable at all."""
+        """Runtime to hold the delivery to, or 0 if it cannot be worked out.
+
+        The SKU's runtime, not the plan's. They agree on a complete shoot, and
+        when they do not it is because the photographs fall short of what was
+        sold -- in which case measuring against the plan would bless exactly the
+        delivery the customer was not promised. The render sheet already refuses
+        to start that render; this refuses to finish it.
+
+        A planner that will not build is not a reason to block a delivery: the
+        gate is a guard against a short render, not a second gate on whether the
+        order is renderable at all.
+        """
+        try:
+            from . import catalog_bridge as cat
+            o = orders.get(self.db, order_id)
+            sku = cat.skus().get(o["sku"]) if o else None
+            if sku and sku.seconds:
+                return int(sku.seconds)
+        except Exception:                                     # noqa: BLE001
+            pass
         try:
             from . import manual
             return manual.build(self.db, self.data_dir, order_id).total_seconds

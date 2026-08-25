@@ -147,8 +147,7 @@ def test_the_whole_purchase(client, app):
 
     csrf = csrf_of(client, app, path)
     files = [("files", (f"{i:02d}_{n}.jpg", io.BytesIO(JPEG + bytes([i])), "image/jpeg"))
-             for i, n in enumerate(["front-elevation", "foyer", "kitchen",
-                                    "patio", "rear-aerial"], 1)]
+             for i, n in enumerate(ROOMS, 1)]
     r = client.post(f"{path}/upload", files=files, data={"csrf": csrf},
                     follow_redirects=False)
     assert r.status_code == 303 and "err" not in r.headers["location"]
@@ -396,9 +395,9 @@ def test_production_with_no_operator_list_admits_nobody(tmp_path, monkeypatch):
 # ---------------------------------------------------------------- notifications
 
 
-def _pay(client, oid, amount=24900, eid="evt_n"):
+def _pay(client, oid, amount=24900, eid="evt_n", session=None):
     ev = {"id": eid, "type": "checkout.session.completed",
-          "data": {"object": {"id": "cs", "payment_status": "paid",
+          "data": {"object": {"id": session or "cs", "payment_status": "paid",
                               "amount_total": amount, "client_reference_id": oid}}}
     raw = json.dumps(ev).encode()
     return client.post("/webhooks/stripe", content=raw,
@@ -1104,19 +1103,96 @@ def test_an_empty_upload_from_the_shot_list_shows_the_error(client, app):
 # ------------------------------------------------- operator-rendered orders
 
 
-def _ready_paid_order(client, app, sku="re-listing-pro"):
+# Enough photographs to actually reach the runtime the SKU sells. Four made a
+# 15-second plan for a 42-second order, which the delivery gate now correctly
+# refuses -- the fixture was quietly testing the broken-promise case.
+ROOMS = ["front-elevation", "foyer", "living-room", "kitchen", "dining-room",
+         "primary-bedroom", "primary-bath", "patio", "drone-overhead"]
+
+
+def _ready_paid_order(client, app, sku="re-listing-pro", rooms=None):
     """A paid order with enough real photographs to plan."""
     sign_in(client, app, "agent@example.com")
     oid = start_order(client, sku)
     csrf = csrf_of(client, app, f"/order/{oid}")
     client.post(f"/order/{oid}/upload", data={"csrf": csrf}, files=[
         ("files", (f"{i:02d}_{n}.jpg", io.BytesIO(JPEG + bytes([i])), "image/jpeg"))
-        for i, n in enumerate(["front-elevation", "foyer", "kitchen", "patio"], 1)])
+        for i, n in enumerate(rooms if rooms is not None else ROOMS, 1)])
     client.post(f"/order/{oid}/brief", data={
         "q0": "1420 Cedar Ridge Rd", "q1": "Cedar Realty", "q2": "golden hour",
         "csrf": csrf})
-    _pay(client, oid)
+    # Unique event id and the SKU's own price: Stripe events are deduped by id,
+    # so a fixed one silently left the second order in a test unpaid.
+    from flythrough_service import catalog_bridge as cat
+    _pay(client, oid, amount=cat.price_cents(sku), eid=f"evt_{oid}",
+         session=f"cs_{oid}")
     return oid
+
+
+def test_the_plan_runs_the_length_the_sku_sells(client, app):
+    """The sheet used to print 21s for a SKU sold as 16, because build_plan took
+    neither the runtime nor the tempo. "one property, 42 seconds" is on the
+    sales page next to the price -- it is a promise, not an estimate."""
+    from flythrough_service import catalog_bridge as cat, manual
+    for sku_id, rooms in (("re-listing-pro", None),
+                          ("veh-ad-premium", ["hero", "driver-side", "wheel",
+                                              "engine-bay", "dashboard",
+                                              "front-seats", "rear-seats",
+                                              "centre-screen", "cargo-area"])):
+        oid = _ready_paid_order(client, app, sku_id, rooms=rooms)
+        brief = manual.build(app.state.db, app.state.settings.data_dir, oid)
+        sold = cat.skus()[sku_id].seconds
+        assert brief.sold_seconds == sold
+        assert brief.total_seconds <= sold, (
+            f"{sku_id}: planned {brief.total_seconds}s, sold {sold}s")
+        assert brief.total_seconds >= sold * manual.SHORT_PLAN, (
+            f"{sku_id}: planned {brief.total_seconds}s, sold {sold}s")
+
+
+def test_an_advert_is_cut_faster_than_a_tour(client, app):
+    """Same machinery, different film. A 6-second orbit of a supercar is not
+    restrained, it is boring, and it costs the same as three beats that each
+    say something. The tempo lives on the SKU because it is what was sold."""
+    from flythrough_service import manual
+    car = ["hero", "driver-side", "wheel", "engine-bay", "dashboard",
+           "front-seats", "rear-seats", "centre-screen", "cargo-area"]
+    ad = manual.build(app.state.db, app.state.settings.data_dir,
+                      _ready_paid_order(client, app, "veh-ad-premium", rooms=car))
+    tour = manual.build(app.state.db, app.state.settings.data_dir,
+                        _ready_paid_order(client, app, "re-listing-pro"))
+    assert ad.tempo == "hype" and tour.tempo == "tour"
+    assert max(s["seconds"] for s in ad.shots) < min(
+        s["seconds"] for s in tour.shots)
+
+
+def test_a_shoot_too_short_for_the_sku_blocks_the_render(client, app):
+    """Trimming can only shorten. If four photographs cannot reach a 42-second
+    film, no cap fixes it -- every shot is anchored between two real
+    photographs, so runtime is bounded by how many were sent. The sheet has to
+    say that before the credits, not after."""
+    from flythrough_service import manual
+    oid = _ready_paid_order(client, app, "re-listing-pro",
+                            rooms=["front-elevation", "foyer", "kitchen"])
+    brief = manual.build(app.state.db, app.state.settings.data_dir, oid)
+    assert any("sold as 42s" in b for b in brief.blocks), brief.blocks
+    assert "Do not render" in client.get(f"/admin/order/{oid}").text
+
+
+def test_the_delivery_gate_measures_what_was_sold(client, app, tmp_path):
+    """Not what the plan happened to be. On a short shoot the plan is short too,
+    so measuring against it would bless exactly the delivery the customer was
+    never promised."""
+    from flythrough_service import orders
+    oid = _ready_paid_order(client, app, "re-listing-pro",
+                            rooms=["front-elevation", "foyer", "kitchen"])
+    clips = _clips_for(app, oid, tmp_path)          # as long as the SHORT plan
+    csrf = csrf_of(client, app, f"/admin/order/{oid}")
+    r = client.post(f"/admin/order/{oid}/clips", data={"csrf": csrf},
+                    files=[("files", (c.name, c.read_bytes(), "video/mp4"))
+                           for c in clips], follow_redirects=False)
+    assert "err=" in r.headers["location"]
+    assert "42s" in r.headers["location"]
+    assert orders.get(app.state.db, oid)["status"] != "delivered"
 
 
 def test_the_sheet_names_the_length_before_the_prompts(client, app):

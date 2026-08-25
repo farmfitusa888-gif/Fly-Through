@@ -46,7 +46,7 @@ REFERRAL_COOKIE = "ft_ref"
 
 
 def default_renderer(*, order_id, vertical, slug, originals, out_dir, brief,
-                     placement, originals_url=""):
+                     placement, originals_url="", tempo="tour", max_seconds=None):
     """The real renderer: pipeline.plan_runner, unchanged.
 
     Imported lazily so the web app starts on a machine with no ffmpeg. The
@@ -68,7 +68,8 @@ def default_renderer(*, order_id, vertical, slug, originals, out_dir, brief,
     submit, poll = provider_from_env()
     return render_order(vertical=vertical, slug=slug, originals=Path(originals),
                         out_dir=Path(out_dir), brief=brief, placement=placement,
-                        submit=submit, poll=poll,
+                        submit=submit, poll=poll, tempo=tempo,
+                        max_seconds=max_seconds,
                         originals_url=originals_url)
 
 
@@ -1048,9 +1049,12 @@ def create_app(settings: Settings | None = None, *, renderer=None,
             f'<div class="card warn"><h3>Set the length on every shot</h3>'
             f'<p>{lengths}</p>'
             f'<p>Total <strong>{brief.total_seconds}s</strong> across '
-            f'{len(brief.shots)} shots, on '
+            f'{len(brief.shots)} shots, at '
+            f'<span class="mono">{esc(brief.tempo)}</span> tempo on '
             f'<span class="mono">{esc(brief.model)}</span> at '
-            f'<span class="mono">{esc(brief.tier)}</span>.</p>'
+            f'<span class="mono">{esc(brief.tier)}</span>'
+            + (f' &mdash; sold as <strong>{brief.sold_seconds}s</strong>'
+               if brief.sold_seconds else '') + '.</p>'
             + (f'<p class="note">The provider\'s '
                f'<span class="mono">{esc(brief.duration_field)}</span> field '
                f'takes a whole number of seconds, {brief.duration_min}&ndash;'
