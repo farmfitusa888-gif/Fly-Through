@@ -122,10 +122,13 @@ _re.append(Sku("re-retainer", f"{RETAINER_LISTINGS} listings a month",
                tags=("cancel any time",)))
 
 # ------------------------------------------------------------------- vehicles
+# NOTE: "Walkaround (per VIN)" is deliberately NOT here. $39 is a rate, not a
+# checkout -- see WALKAROUND_MIN_UNITS in ad_pricing. The smallest walkaround
+# anyone can buy on its own is three.
 _veh = [
-    Sku("veh-walkaround", _product("Walkaround (per VIN)").name, 39.0,
-        "one-time", "vehicles", "24 hours", 20,
-        blurb=_product("Walkaround (per VIN)").note),
+    Sku("veh-walkaround-3", _product("Walkaround x3").name, 117.0,
+        "one-time", "vehicles", "24 hours", 20, quantity=3,
+        blurb=_product("Walkaround x3").note),
     Sku("veh-ad-mainstream", "Ad cut - mainstream", 149.0, "one-time",
         "vehicles", "24 hours", 15,
         blurb=_product("Ad cut - mainstream").note),

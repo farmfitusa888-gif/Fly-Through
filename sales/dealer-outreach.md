@@ -33,17 +33,23 @@ your team already shoots. No studio, no turntable, no second visit.**
 
 | Tier | Price | What |
 |---|---|---|
-| **Per unit** | **$39/vehicle** | 20s walkaround, 9:16 + 16:9, thumbnail |
-| **Lot plan — 50** | **$1,450/mo** | 50 units/month, 24h turnaround |
-| **Lot plan — 150** | **$3,600/mo** | 150 units/month, priority queue |
+| **Walkaround ×3** | **$117** | Smallest order — $39 each, 20s, 9:16 + 16:9 + thumbnail |
+| **Lot plan — 25** | **$850/mo** | 25 units/month, $34 each |
+| **Lot plan — 50** | **$1,450/mo** | 50 units/month, $29 each |
+| **Lot plan — 100** | **$2,600/mo** | 100 units/month, $26 each |
 | **Full inventory** | **quote** | Every new unit, API/folder drop, same-day |
 
-**$39 is deliberate.** It is below the mental threshold where a dealer needs
-approval, and it compares against $150–300 for a videographer per unit — which
-is exactly why almost no dealer shoots video for anything but the halo cars.
+**$39 a vehicle is deliberate.** It is below the mental threshold where a dealer
+needs approval, and it compares against $150–300 for a videographer per unit —
+which is exactly why almost no dealer shoots video for anything but the halo cars.
 
-At 150 units/month the render cost is roughly $2.05/unit (15s at 1080p, verified
-rate), so the lot plan runs at roughly 91% gross margin before labour.
+**Three is the minimum order**, and that is deliberate too. The flat card fee is
+$0.30 and the handling on a single order — intake, chasing the photo link,
+delivery — is identical whether the invoice reads $39 or $249. The floor is on
+order size, not a discount; discounts start where the commitment does, at Lot 25.
+
+A 20s walkaround renders for $2.10 (35 cr/sec at 1080p, verified rate), so every
+tier on this table clears 89% gross margin before labour.
 
 ## 3. Cold email — dealers
 
@@ -55,7 +61,7 @@ rate), so the lot plan runs at roughly 91% gross margin before labour.
 > turntable, no second pass by your photographer. You send the folder, I send
 > back video for every VIN the next day.
 >
-> $39 a unit, or $1,450/month for 50.
+> $39 a unit, three-unit minimum. Or $1,450/month for 50.
 >
 > Want me to do five of your current inventory free so you can put them on the
 > VDPs and watch what happens to time-on-page?

@@ -46,21 +46,21 @@
   ],
   "vehicle": [
     {
-      "sku": "veh-walkaround",
-      "name": "Walkaround (per VIN)",
-      "price": 39.0,
-      "per": "per vehicle \u00b7 20 seconds",
+      "sku": "veh-walkaround-3",
+      "name": "Walkaround x3",
+      "price": 117.0,
+      "per": "three vehicles \u00b7 20 seconds each",
       "bullets": [
-        "Every VIN, not just the halo cars",
+        "$39 a vehicle \u2014 three-vehicle minimum",
         "9:16 + 16:9 + thumbnail",
         "Folder drop, 24h turnaround",
-        "You own it outright"
+        "You own them outright"
       ],
       "featured": false,
-      "note": "Commodity. Every unit on the lot. Volume play.",
+      "note": "Minimum online order. Three VINs at the full $39 rate.",
       "seconds": 20,
       "beats": 7,
-      "render_usd": 2.1
+      "render_usd": 6.3
     },
     {
       "sku": "veh-ad-mainstream",
@@ -117,8 +117,8 @@
   "bands": [
     {
       "band": "Under $40k",
-      "product": "Walkaround only",
-      "price": 39.0,
+      "product": "Walkaround x3",
+      "price": 117.0,
       "why": "Ad spend on these units is rarely justified. Sell volume, not ads."
     },
     {
@@ -229,15 +229,15 @@
       ]
     },
     {
-      "id": "veh-walkaround",
-      "name": "Walkaround (per VIN)",
-      "price": 39.0,
+      "id": "veh-walkaround-3",
+      "name": "Walkaround x3",
+      "price": 117.0,
       "mode": "one-time",
       "vertical": "vehicles",
       "turnaround": "24 hours",
-      "quantity": 1,
+      "quantity": 3,
       "unit_price": 39.0,
-      "blurb": "Commodity. Every unit on the lot. Volume play.",
+      "blurb": "Minimum online order. Three VINs at the full $39 rate.",
       "tags": []
     },
     {

@@ -335,6 +335,7 @@ def build() -> Path:
         <span>{prop['title']}</span>
         <span>{prop['brief']}</span>
         <span><b>{prop['shots']} shots</b> · {prop['seconds']}s · anchored</span>
+        <span><a href="{prop['master']}">Full film 16:9</a> · <a href="{prop['vertical']}">9:16</a></span>
       </div>
     </div>"""
 

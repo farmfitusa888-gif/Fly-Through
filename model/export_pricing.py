@@ -51,6 +51,12 @@ PROPERTY_COPY = {
 }
 
 VEHICLE_COPY = {
+    "Walkaround x3": ("three vehicles · 20 seconds each", [
+        "$39 a vehicle — three-vehicle minimum",
+        "9:16 + 16:9 + thumbnail",
+        "Folder drop, 24h turnaround",
+        "You own them outright",
+    ]),
     "Walkaround (per VIN)": ("per vehicle · 20 seconds", [
         "Every VIN, not just the halo cars",
         "9:16 + 16:9 + thumbnail",
@@ -100,6 +106,8 @@ def build() -> dict:
 
     veh = []
     for p in PRODUCTS:
+        if p.channel != "online":
+            continue          # a rate, not a card -- there is nothing to buy
         per, bullets = VEHICLE_COPY[p.name]
         m = p.margin()
         veh.append({"sku": sku_for(p.name), "name": p.name, "price": p.price, "per": per,

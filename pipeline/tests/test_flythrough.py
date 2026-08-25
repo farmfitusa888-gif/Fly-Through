@@ -6,6 +6,7 @@ drifts from the verified rate card.
 """
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -996,3 +997,63 @@ def test_site_has_no_dead_internal_links():
     if not (ba.DIST / "index.html").exists():
         pytest.skip("dist/ not built; run python3 site/build_all.py")
     assert ba.check_links() == []
+
+
+def test_buying_more_never_costs_more_per_unit():
+    """A first pass priced the 3-pack at $99 -- $33 a vehicle -- which undercut
+    the 25-vehicle plan at $34. Committing to more would have cost more each,
+    which makes every plan on the page look like a worse deal than the sampler.
+    The whole walkaround ladder must be monotonic."""
+    _catalog()          # puts model/ on sys.path
+    import ad_pricing
+    three = next(p for p in ad_pricing.PRODUCTS if p.name == "Walkaround x3")
+    rungs = ([(three.quantity, three.unit_price)]
+             + [(l.units, l.per_unit) for l in ad_pricing.LOT_PLANS])
+    assert [u for u, _ in rungs] == sorted(u for u, _ in rungs), "rungs out of order"
+    for (ua, pa), (ub, pb) in zip(rungs, rungs[1:]):
+        assert pa >= pb, f"{ub} units at ${pb} beats {ua} units at ${pa}"
+
+
+def test_the_per_vin_rate_is_not_sellable_on_its_own():
+    """$39 is a rate, not a checkout: the flat card fee plus the per-order
+    handling makes a single-unit online order the thinnest thing we could sell.
+    It must stay out of the catalogue and off the page."""
+    import ad_pricing
+    cat = _catalog()
+    per_vin = next(p for p in ad_pricing.PRODUCTS
+                   if p.name == "Walkaround (per VIN)")
+    assert per_vin.channel == "in_plan"
+    assert not [s for s in cat.CATALOG if s.quantity == 1 and s.vertical == "vehicles"
+                and s.price < 100], "a sub-$100 single-unit vehicle SKU is buyable"
+    root = Path(__file__).resolve().parents[2]
+    shown = json.loads((root / "site" / "pricing.json").read_text())["vehicle"]
+    assert per_vin.name not in [r["name"] for r in shown]
+
+
+def test_minimum_order_is_priced_at_the_full_rate():
+    """The floor is on order SIZE. If the 3-pack ever carries a discount it
+    stops being a minimum and starts competing with the plans."""
+    import ad_pricing
+    three = next(p for p in ad_pricing.PRODUCTS if p.name == "Walkaround x3")
+    per_vin = next(p for p in ad_pricing.PRODUCTS
+                   if p.name == "Walkaround (per VIN)")
+    assert three.quantity == ad_pricing.WALKAROUND_MIN_UNITS
+    assert three.unit_price == pytest.approx(per_vin.price)
+
+
+def test_disclosure_page_is_not_published_without_its_originals():
+    """/o/<slug>/ is the artefact AB 723 requires a link to. If the originals
+    are not on disk the page must not exist -- a page claiming to show unaltered
+    originals while showing broken images is a false statement, not a degraded
+    one. Pinned because the failure mode is silent: the page looks fine to the
+    person who built it and broken to the regulator who opens it."""
+    root = Path(__file__).resolve().parents[2]
+    dist_o = root / "site" / "dist" / "o"
+    if not dist_o.is_dir():
+        pytest.skip("dist/ not built")
+    for page in dist_o.glob("*/index.html"):
+        originals = page.parent / "originals"
+        html = page.read_text()
+        for ref in set(re.findall(r'src="(originals/[^"]+)"', html)):
+            assert (page.parent / ref).is_file(), (
+                f"{page.parent.name} published with a missing original: {ref}")

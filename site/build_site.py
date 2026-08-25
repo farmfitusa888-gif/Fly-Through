@@ -133,6 +133,7 @@ def main() -> int:
     DIST.mkdir(parents=True, exist_ok=True)
     jobs_dir = ROOT / "samples"
     built: list[str] = []
+    skipped: list[tuple[str, list[str]]] = []
 
     for manifest in sorted(jobs_dir.glob("*/assets.json")):
         spec = json.loads(manifest.read_text())
@@ -142,21 +143,50 @@ def main() -> int:
         photos = [{"path": f"{i+1:02d}_{s['room']}.png", "room_key": s["room"]}
                   for i, s in enumerate(spec["stills"])]
         src = manifest.parent / "delivery" / "originals"
-        build_job(CONFIG, slug, spec["listing"], photos, src if src.is_dir() else None)
+        have = ({p.name for p in src.iterdir()
+                 if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}}
+                if src.is_dir() else set())
+        want = {ph["path"] for ph in photos}
+        if not want <= have:
+            # REFUSE to publish. This page's entire purpose is to be the
+            # unaltered original that Bus. & Prof. Code s.10140.8 requires a
+            # link to. A page that makes that claim and then shows broken
+            # images is not a weaker version of compliance -- it is a false
+            # statement, and it is the first thing anyone checking would open.
+            skipped.append((slug, sorted(want - have)))
+            # Remove any page a previous build left behind. Leaving a stale one
+            # is the same false claim, just with an older timestamp.
+            stale = DIST / "o" / slug
+            if stale.exists():
+                shutil.rmtree(stale)
+                print(f"  REMOVED stale /o/{slug}/")
+            print(f"  SKIPPED /o/{slug}/ -- {len(want - have)} original(s) missing")
+            continue
+        build_job(CONFIG, slug, spec["listing"], photos, src)
         built.append(slug)
         print(f"  built /o/{slug}/")
 
     # NOT dist/index.html -- that is the landing page, built by build_landing.py.
     (DIST / "o").mkdir(parents=True, exist_ok=True)
     (DIST / "o" / "index.html").write_text(originals_index(CONFIG, built))
-    (DIST / "_headers").write_text(
-        "/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: no-referrer\n")
+    # _headers is written by build_all.py, which is the only place that knows the
+    # whole output tree. Two writers of one host-config file is how a security
+    # header silently disappears.
     print(f"  built /o/  (originals hub)")
     print()
     print(f"  domain : {CONFIG['domain']}   (change it in site/config.json only)")
     print(f"  deploy : upload site/dist/ to Netlify, Cloudflare Pages or any bucket")
     if built:
         print(f"  verify : https://{CONFIG['domain']}{CONFIG['originals_path']}/{built[0]}")
+    if skipped:
+        print()
+        print("  NOT PUBLISHED -- these jobs have no originals on disk:")
+        for slug, missing in skipped:
+            print(f"    {slug}: {', '.join(missing)}")
+        print("  Put the client's own unedited photographs in")
+        print("    samples/<slug>/delivery/originals/  and re-run.")
+        print("  Until then the disclosure link for these jobs does not resolve,")
+        print("  so the videos must not be published either.")
     return 0
 
 

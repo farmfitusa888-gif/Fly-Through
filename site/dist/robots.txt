@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+Disallow: /start
+Sitemap: https://iflythroughit.com/sitemap.xml

@@ -41,21 +41,45 @@ class Product:
     beats: int
     price: float
     note: str
+    quantity: int = 1
+    channel: str = "online"      # "online" = buyable on its own; "in_plan" = a rate
+
+    @property
+    def unit_price(self) -> float:
+        return self.price / self.quantity
 
     @property
     def render_usd(self) -> float:
-        return self.seconds * CR_PER_SEC * USD_PER_CREDIT
+        return self.seconds * self.quantity * CR_PER_SEC * USD_PER_CREDIT
 
     def margin(self) -> dict:
         fees = self.price * PAYMENT_PCT + PAYMENT_FLAT
         gp = self.price - self.render_usd - fees
+        hours = (MINUTES_PER_AD / 60) * (1 + (self.quantity - 1) * 0.5)
         return {"render": self.render_usd, "fees": fees, "gp": gp,
-                "pct": gp / self.price, "hourly": gp / (MINUTES_PER_AD / 60)}
+                "pct": gp / self.price, "hourly": gp / hours}
 
+
+# MINIMUM ORDER. $39 is the right RATE for a walkaround and the wrong PRICE for
+# a single online order. At 2.9% + $0.30 the flat fee alone is 0.77 of it, and
+# the order overhead that never shows up in a per-unit margin -- the intake
+# email, chasing the photo link, the delivery -- is the same whether the invoice
+# says $39 or $249. So $39 survives as the in-plan and 3-pack rate, and the
+# smallest thing anyone can buy on its own is three.
+WALKAROUND_MIN_UNITS = 3
+
+# The 3-pack is priced at the FULL per-VIN rate -- three times $39, no discount.
+# A first pass set it at $99 and quietly broke the ladder: $33 a vehicle undercut
+# the 25-vehicle plan at $34, so committing to more would have cost more each.
+# The minimum order is a floor on order SIZE, not a volume discount. Discounts
+# start where the commitment does, at Lot 25.
 
 PRODUCTS = (
+    Product("Walkaround x3", 20, 7, 117.0,
+            "Minimum online order. Three VINs at the full $39 rate.", quantity=3),
     Product("Walkaround (per VIN)", 20, 7, 39.0,
-            "Commodity. Every unit on the lot. Volume play."),
+            "The RATE, not a checkout. Add-on inside a lot plan.",
+            channel="in_plan"),
     Product("Ad cut - mainstream", 15, 7, 149.0,
             "Trucks, SUVs, sedans under ~$80k. Briefed, detail beats, vertical."),
     Product("Ad cut - premium", 16, 8, 249.0,
@@ -67,7 +91,7 @@ PRODUCTS = (
 # Value-based tiering. Production cost is near-identical across these; what
 # differs is the marketing budget attached to the unit.
 BANDS = (
-    ("Under $40k", "Walkaround only", 39.0,
+    ("Under $40k", "Walkaround x3", 117.0,
      "Ad spend on these units is rarely justified. Sell volume, not ads."),
     ("$40k - $80k", "Ad cut - mainstream", 149.0,
      "A truck at $65k carries a real marketing line. This is the volume ad tier."),
@@ -92,7 +116,7 @@ class LotPlan:
         return self.price / self.units
 
     def margin(self) -> dict:
-        seconds = PRODUCTS[0].seconds * self.units
+        seconds = _by_name("Walkaround (per VIN)").seconds * self.units
         render = seconds * CR_PER_SEC * USD_PER_CREDIT
         fees = self.price * PAYMENT_PCT + PAYMENT_FLAT   # ONE invoice, one flat fee
         gp = self.price - render - fees
@@ -106,6 +130,10 @@ LOT_PLANS = (
     LotPlan("Lot 50", 50, 1450.0),
     LotPlan("Lot 100", 100, 2600.0),
 )
+
+
+def _by_name(name: str) -> Product:
+    return next(p for p in PRODUCTS if p.name == name)
 
 
 def report() -> None:
@@ -138,8 +166,11 @@ def report() -> None:
         print(f"{lp.name:<12}{lp.units:>7}{'$%.0f' % lp.price:>9}"
               f"{'$%.2f' % lp.per_unit:>10}{'$%.2f' % m['render']:>9}"
               f"{'$%.2f' % m['gp']:>10}{m['pct']:>8.1%}{'$%.0f' % m['hourly']:>9}")
-    print(f"  A la carte is ${PRODUCTS[0].price:.0f}/VIN. The plans discount that to buy"
-          " predictability:")
+    per_vin = next(p for p in PRODUCTS if p.channel == "in_plan")
+    three = PRODUCTS[0]
+    print(f"  Smallest online order is ${three.price:.0f} for {three.quantity} "
+          f"(${three.unit_price:.0f} each); the in-plan rate is "
+          f"${per_vin.price:.0f}/VIN. The plans discount that to buy predictability:")
     print("  one invoice, one batch, one folder drop -- and the account that makes")
     print("  every ad cut an upsell instead of a cold pitch.")
 
@@ -155,7 +186,7 @@ def report() -> None:
     print(line)
     print("WHY THESE NUMBERS")
     print(line)
-    ferrari = PRODUCTS[2]; truck = PRODUCTS[1]
+    ferrari = _by_name("Ad cut - premium"); truck = _by_name("Ad cut - mainstream")
     print(f"  The two demo ads cost ${ferrari.render_usd:.2f} and ${truck.render_usd:.2f} to render.")
     print("  Production cost is NOT the pricing input -- it is a rounding error at")
     print("  every tier. What differs is the marketing budget attached to the unit.")
