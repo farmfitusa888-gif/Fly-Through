@@ -25,6 +25,21 @@ from flythrough.viewpoint import assess, side_of                # noqa: E402
 
 TAXONOMY = {"rooms": rooms, "vehicles": vehicles, "products": products}
 
+
+def required_anchors(vertical: str) -> tuple[str, ...]:
+    """The shots a film cannot be made without.
+
+    rooms keeps its list in planner.REQUIRED_ANCHORS (it predates the other two
+    verticals); vehicles and products each carry their own. Reading from
+    whichever owns it means the shoot page can never drift from what the
+    planner actually audits.
+    """
+    mod = TAXONOMY[vertical]
+    if hasattr(mod, "REQUIRED_ANCHORS"):
+        return tuple(mod.REQUIRED_ANCHORS)
+    from flythrough.planner import REQUIRED_ANCHORS
+    return tuple(REQUIRED_ANCHORS)
+
 # Real estate can never opt out; the others have no altered-image rule to meet.
 PLACEMENT = {"rooms": "mark_end", "vehicles": "none", "products": "none"}
 

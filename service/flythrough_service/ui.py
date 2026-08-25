@@ -88,6 +88,19 @@ ul.plain{list-style:none;padding:0;margin:0 0 18px}
 ul.plain li{padding:9px 0;border-bottom:1px solid var(--rule);color:var(--dim);
   display:flex;justify-content:space-between;gap:14px;font-size:.93rem}
 ul.plain li:last-child{border-bottom:0}
+ul.shots{list-style:none;padding:0;margin:0 0 24px}
+ul.shots li{border:1px solid var(--rule);border-radius:4px;padding:16px 18px;
+  margin:0 0 10px;background:var(--card)}
+ul.shots li.need{border-left:2px solid var(--ember)}
+ul.shots li.done{border-left:2px solid var(--good);opacity:.72}
+ul.shots .hd{display:flex;align-items:baseline;gap:10px}
+ul.shots .tick{font-family:"JetBrains Mono",monospace;color:var(--ember);width:14px}
+ul.shots li.done .tick{color:var(--good)}
+ul.shots strong{font-weight:500}
+ul.shots em{font-style:normal;font-family:"JetBrains Mono",monospace;
+  font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ember)}
+ul.shots p{color:var(--dim);font-size:.9rem;margin:6px 0 12px}
+ul.shots input[type=file]{margin:0;font-size:.85rem}
 footer{border-top:1px solid var(--rule);margin-top:50px;padding-top:20px;
   color:var(--faint);font-size:.84rem}
 @media(max-width:620px){nav .wrap{gap:14px;flex-wrap:wrap}}

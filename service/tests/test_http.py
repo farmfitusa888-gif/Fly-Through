@@ -630,3 +630,110 @@ def test_only_an_operator_can_send_the_asks(app_with_operator):
     c = TestClient(app_with_operator)
     sign_in(c, app_with_operator, "buyer@example.com")
     assert c.post("/admin/ask", data={"csrf": "x"}).status_code == 404
+
+
+# ----------------------------------------------------------- on-site shoot
+
+
+def _shoot_upload(client, app, oid, slot, name, salt=b"\x01"):
+    csrf = csrf_of(client, app, f"/shoot/{oid}")
+    return client.post(f"/order/{oid}/upload",
+                       data={"csrf": csrf, "slot": slot},
+                       files=[("files", (name, io.BytesIO(JPEG + salt),
+                                         "image/jpeg"))],
+                       headers={"referer": f"http://testserver/shoot/{oid}"},
+                       follow_redirects=False)
+
+
+def test_the_shot_list_names_what_is_still_missing(client, app):
+    sign_in(client, app)
+    oid = start_order(client)
+    page = client.get(f"/shoot/{oid}").text
+    assert "Still needed" in page
+    for anchor in ("exterior", "living", "kitchen"):
+        assert anchor in page
+
+
+def test_a_slot_beats_the_filename(client, app):
+    """A phone names everything IMG_4417.jpg, which resolves to nothing useful.
+    The slot the photographer tapped is the truth."""
+    sign_in(client, app)
+    oid = start_order(client)
+    _shoot_upload(client, app, oid, "kitchen", "IMG_4417.jpg")
+    with app.state.db.tx() as c:
+        row = c.execute("SELECT room_key FROM uploads WHERE order_id=?",
+                        (oid,)).fetchone()
+    assert row["room_key"] == "kitchen"
+
+
+def test_a_bogus_slot_falls_back_to_the_filename(client, app):
+    """A hand-posted slot must not be able to invent a room key the taxonomy
+    does not have -- that would reach the planner as an unknown room."""
+    sign_in(client, app)
+    oid = start_order(client)
+    _shoot_upload(client, app, oid, "not_a_real_room", "kitchen.jpg")
+    with app.state.db.tx() as c:
+        row = c.execute("SELECT room_key FROM uploads WHERE order_id=?",
+                        (oid,)).fetchone()
+    assert row["room_key"] == "kitchen"
+
+
+def test_shooting_returns_you_to_the_shot_list(client, app):
+    """Not to the brief page. On site you take the next shot."""
+    sign_in(client, app)
+    oid = start_order(client)
+    r = _shoot_upload(client, app, oid, "kitchen", "IMG_1.jpg")
+    assert f"/shoot/{oid}" in r.headers["location"]
+
+
+def test_the_page_says_you_can_leave_once_the_set_holds(client, app):
+    sign_in(client, app)
+    oid = start_order(client)
+    for i, slot in enumerate(("exterior", "living", "kitchen", "patio"), 1):
+        _shoot_upload(client, app, oid, slot, f"IMG_{i}.jpg", salt=bytes([i]))
+    page = client.get(f"/shoot/{oid}").text
+    assert "You can leave" in page
+    assert "Still needed" not in page
+
+
+def test_the_aerial_warning_fires_on_site_not_after(client, app):
+    """The exact failure this project hit: a rear-framed ground shot cut to a
+    front-framed aerial. On site it is a two-minute fix; a week later it is a
+    re-shoot nobody will do."""
+    sign_in(client, app)
+    oid = start_order(client)
+    for i, slot in enumerate(("exterior", "living", "kitchen"), 1):
+        _shoot_upload(client, app, oid, slot, f"IMG_{i}.jpg", salt=bytes([i]))
+    _shoot_upload(client, app, oid, "patio", "IMG_9.jpg", salt=b"\x09")
+    _shoot_upload(client, app, oid, "aerial", "drone-overhead.jpg", salt=b"\x0a")
+    page = client.get(f"/shoot/{oid}").text
+    assert "aerial" in page.lower()
+    assert "You can leave" not in page
+
+
+def test_the_shot_list_is_per_vertical(client, app):
+    sign_in(client, app)
+    oid = start_order(client, "veh-ad-premium")
+    page = client.get(f"/shoot/{oid}").text
+    assert "Three-quarter front" in page and "Odometer" in page
+    assert "Kitchen" not in page
+
+
+def test_a_paid_order_has_no_shoot_page(client, app):
+    """The shot list is for before payment. After it, nothing more is uploaded."""
+    from flythrough_service import orders
+    sign_in(client, app)
+    oid = start_order(client)
+    with app.state.db.tx() as c:
+        orders.transition(c, app.state.db, oid, "awaiting_payment")
+        orders.transition(c, app.state.db, oid, "paid")
+    r = client.get(f"/shoot/{oid}", follow_redirects=False)
+    assert r.status_code == 303 and f"/order/{oid}" in r.headers["location"]
+
+
+def test_another_customer_cannot_open_the_shot_list(client, app):
+    sign_in(client, app, "first@example.com")
+    oid = start_order(client)
+    client.cookies.clear()
+    sign_in(client, app, "second@example.com")
+    assert "Not found" in client.get(f"/shoot/{oid}").text

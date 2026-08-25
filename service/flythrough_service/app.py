@@ -263,6 +263,8 @@ def create_app(settings: Settings | None = None, *, renderer=None,
             f'<p class="lede">{esc(sku.blurb)}</p>'
             + ("" if paid else
                f'<div class="card"><h3>Photographs</h3>'
+               f'<p><a href="/shoot/{esc(order_id)}">Shooting it now? '
+               f'Open the shot list on your phone →</a></p>'
                f'<p>{esc(ready.required)} minimum. '
                f'<a href="/shot-guide/{esc({"rooms": "property", "vehicles": "vehicle", "products": "product"}[o["vertical"]])}/">'
                f'What to send →</a></p>'
@@ -281,7 +283,7 @@ def create_app(settings: Settings | None = None, *, renderer=None,
 
     @app.post("/order/{order_id}/upload")
     async def upload(request: Request, order_id: str, files: list[UploadFile] = None,
-                     csrf: str = Form("")):
+                     csrf: str = Form(""), slot: str = Form("")):
         p = who(request)
         if p is None or p.customer_id is None:
             return RedirectResponse("/login", 303)
@@ -329,12 +331,24 @@ def create_app(settings: Settings | None = None, *, renderer=None,
                           (new_id("upl"), order_id, f.filename or "photo.jpg",
                            "image/jpeg", stored.bytes, stored.sha256,
                            str(stored.path),
-                           mod.resolve(Path(f.filename or "").stem).key,
+                           # A slot chosen on the shoot page beats a filename:
+                           # a phone names everything IMG_4417.jpg, which
+                           # resolves to nothing useful.
+                           (slot if slot in mod.TOUR_ORDER
+                            else mod.resolve(Path(f.filename or "").stem).key),
                            pos, now()))
             added += 1
         q = f"?msg={quote(f'{added} added')}" if added else ""
         if errs:
             q = f"?err={quote('; '.join(errs[:3]))}"
+        back = str(request.headers.get("referer", ""))
+        if "/shoot/" in back:
+            # On the shot list the green tick already says it landed. A banner
+            # saying "1 added" on top of that is noise on a small screen, and it
+            # pushes the thing you came to read off the top.
+            return RedirectResponse(
+                f"/shoot/{order_id}" + (f"?err={quote('; '.join(errs[:3]))}"
+                                        if errs else ""), 303)
         return RedirectResponse(f"/order/{order_id}{q}", 303)
 
     @app.post("/order/{order_id}/brief")
@@ -628,6 +642,129 @@ def create_app(settings: Settings | None = None, *, renderer=None,
               f'<form method="post" action="/logout">'
               f'<button class="btn ghost">Sign out</button></form>')
         return render_page(request, "Partner", body)
+
+    # ---------------------------------------------------------------- shoot
+    # Plain-English labels and a one-line instruction per slot, taken from the
+    # same guides the client gets. Only the slots worth prompting for on site --
+    # a phone screen with twenty rows is a screen nobody scrolls.
+    SHOOT_LIST = {
+        "rooms": [
+            ("exterior", "Front of the house",
+             "Square to the front, camera level. Do not tilt up."),
+            ("living", "Main living room",
+             "Stand in the doorway you came in by, far side of the room in frame."),
+            ("kitchen", "Kitchen",
+             "Island or main counter, and the way through to the next room."),
+            ("entry", "Entry or hallway", "Just inside the front door, looking in."),
+            ("dining", "Dining", "Table framed, doorway behind you."),
+            ("primary_bed", "Primary bedroom", "From the doorway. Bed and window together."),
+            ("primary_bath", "Primary bathroom", "From the doorway. Stay out of the mirror."),
+            ("patio", "Patio or deck",
+             "Stand on the lawn looking BACK at the house."),
+            ("yard", "Yard", "Shoot toward the house so the yard reads as belonging to it."),
+            ("aerial", "Aerial (optional)",
+             "Must be over the SAME side as your last outdoor shot."),
+        ],
+        "vehicles": [
+            ("hero", "Three-quarter front",
+             "Front corner, camera at headlight height, wheels turned slightly toward you."),
+            ("dash", "Dashboard", "From the driver's headrest. Screen and gauges in frame."),
+            ("front_seats", "Front seats", "From the open driver's door."),
+            ("front", "Nose", "Square to the grille, camera level."),
+            ("driver_side", "Driver side", "Square to the middle, bumper to bumper."),
+            ("rear", "Back", "Square to the tailgate."),
+            ("passenger_side", "Passenger side", "Same as driver side, other face."),
+            ("wheels", "One wheel", "Crouch. Caliper and badge visible."),
+            ("door_open", "Driver's door open",
+             "From outside looking in. This is what carries the camera inside."),
+            ("infotainment", "Centre screen", "Screen ON, home screen showing."),
+            ("cargo", "Trunk, bed or cargo", "Open, square from behind."),
+            ("odometer", "Odometer", "Ignition on so the number is lit."),
+        ],
+        "products": [
+            ("hero", "Three-quarter beauty shot", "Turned slightly so two faces show."),
+            ("detail", "One close detail", "Fill the frame with the part you are proud of."),
+            ("scale", "Beside something known",
+             "A hand, a phone, a coin — anything a buyer knows the size of."),
+            ("front", "Front", "Dead square, centred, camera at mid-height."),
+            ("side", "Side", "Dead square from one side."),
+            ("back", "Back", "Dead square from behind."),
+            ("top", "From above", "Directly overhead."),
+            ("material", "The surface", "Rake the light across it, do not flatten it."),
+            ("open", "Opened", "Lid off, unfolded, unzipped."),
+        ],
+    }
+
+    @app.get("/shoot/{order_id}", response_class=HTMLResponse)
+    def shoot(request: Request, order_id: str, msg: str = "", err: str = ""):
+        """The shot list, on the phone, while the photographer is still there.
+
+        Every quality problem this project has hit traces to the source set: an
+        aerial framed over the wrong side, a missing bridge between the front and
+        the back, a dark infotainment screen. The guides are good and are read
+        the night before. A check that runs at the moment of capture is worth far
+        more, because a re-shoot is free while you are standing in the room and
+        impossible once you have driven away.
+        """
+        p = who(request)
+        if p is None or p.customer_id is None:
+            return RedirectResponse(f"/login?next=/shoot/{order_id}", 303)
+        o = orders.get(db, order_id, customer_id=p.customer_id)
+        if o is None:
+            return render_page(request, "Not found", "<h1>Not found.</h1>",
+                               narrow=True)
+        if o["status"] not in ("draft", "awaiting_payment"):
+            return RedirectResponse(f"/order/{order_id}", 303)
+
+        with db.tx() as c:
+            ups = c.execute("SELECT room_key, filename FROM uploads"
+                            " WHERE order_id=? ORDER BY position",
+                            (order_id,)).fetchall()
+        have = {u["room_key"] for u in ups}
+        needed = render.required_anchors(o["vertical"])
+        prep = render.prepare(o["vertical"], [
+            {"filename": u["filename"], "path": "", "room_key": u["room_key"],
+             "position": i} for i, u in enumerate(ups, 1)])
+
+        rows = []
+        for key, label, howto in SHOOT_LIST[o["vertical"]]:
+            done = key in have
+            req = key in needed
+            tick = "✓" if done else ("●" if req else "")
+            cls = "shot done" if done else ("shot need" if req else "shot")
+            rows.append(
+                f'<li class="{cls}">'
+                f'<div class="hd"><span class="tick">{tick}</span>'
+                f'<strong>{esc(label)}</strong>'
+                f'{" <em>required</em>" if req and not done else ""}</div>'
+                f'<p>{esc(howto)}</p>'
+                f'<form method="post" action="/order/{esc(order_id)}/upload" '
+                f'enctype="multipart/form-data">{csrf_field(request)}'
+                f'<input type="hidden" name="slot" value="{esc(key)}">'
+                f'<input type="file" name="files" accept="image/*" '
+                f'capture="environment" onchange="this.form.submit()">'
+                f'</form></li>')
+
+        missing = [k for k in needed if k not in have]
+        if missing:
+            state = (f'<div class="flash err">Still needed: '
+                     f'{esc(", ".join(m.replace("_", " ") for m in missing))}</div>')
+        elif prep.warnings:
+            state = ('<div class="flash err">'
+                     + "<br>".join(esc(w) for w in prep.warnings) + "</div>")
+        else:
+            state = ('<div class="flash ok">Every required shot is in, and the '
+                     'set holds together. You can leave.</div>')
+
+        body = (f'{flash(err) or flash(msg, "ok")}{state}'
+                f'<p class="kicker">On site</p><h1>Shot list</h1>'
+                f'<p class="lede">Tap a row to take that shot. It uploads as you '
+                f'go and this page tells you what is still missing — while you '
+                f'can still walk back and get it.</p>'
+                f'<ul class="shots">{"".join(rows)}</ul>'
+                f'<p><a class="btn ghost" href="/order/{esc(order_id)}">'
+                f'Finish the brief →</a></p>')
+        return render_page(request, "Shot list", body, narrow=True)
 
     # ------------------------------------------------------------- outcomes
     @app.get("/o/{order_id}", response_class=HTMLResponse)
