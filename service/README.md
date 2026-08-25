@@ -111,3 +111,20 @@ credibility everything else here rests on.
 | Variable | Needed | What for |
 |---|---|---|
 | `FLYTHROUGH_OPERATORS` | production | Comma-separated addresses allowed on `/admin/*`. **Empty admits nobody.** |
+
+## Security posture
+
+Audited rather than assumed. What is enforced, and why:
+
+| | |
+|---|---|
+| **Every response carries CSP, nosniff, Referrer-Policy, X-Frame-Options** | The static site gets these from `_headers`, which the app never sees — so the pages a customer actually transacts on were the unprotected ones. |
+| **CSP uses a per-response nonce, never `unsafe-inline`** | A policy with `unsafe-inline` stops almost nothing. The shot list's auto-submit moved out of an inline `onchange` into a nonce'd script specifically so the policy could stay strict. |
+| **`next=` is allow-shaped, not blocklisted** | `startswith("/")` was the bug: `//evil.com` passes it and a browser reads it as absolute. An attacker could mail `/login?next=//evil.com`, the victim signs in with us and lands on their page. |
+| **Public file route checks the name *and* the resolved path** | The basename check alone was safe by accident — `Path("..").name` is `".."`, not `""`. The decisive check is that the resolved path is inside the originals directory. |
+| **All SQL is parameterised** | One f-string exists, in `orders.transition`, over a value from a literal dict. It carries an assert so a future edit fails loudly rather than becoming an injection. |
+| **Errors leak nothing** | Probed: no traceback, file path, module name or SQL reaches a response body. |
+| **404 rather than 403 on operator routes** | A 403 confirms an operator console exists at that path and is worth attacking. |
+| **Rate limits live in the database** | Workers do not share memory, and a restart must not reset a limit. |
+| **Secrets are `repr=False`** | FastAPI puts locals in tracebacks; without it a live Stripe key rides into the error log. |
+| **HSTS only in production** | Sending it from a dev server on http pins a name to https on the developer's own machine. |

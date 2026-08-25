@@ -123,24 +123,37 @@ def money(cents: int) -> str:
     return f"${cents / 100:,.2f}"
 
 
+# Attaches the auto-submit behaviour that used to be an inline onchange
+# attribute. It moved here so the CSP can forbid inline handlers outright: a
+# policy with 'unsafe-inline' is a policy that stops almost nothing, and the
+# whole point of having one is that an escaping mistake somewhere else does not
+# become a script execution.
+AUTOSUBMIT_JS = (
+    "document.querySelectorAll('input[type=file][data-autosubmit]')"
+    ".forEach(function(i){i.addEventListener('change',function(){"
+    "if(i.files&&i.files.length){i.form.submit();}});});"
+)
+
+
 def page(title: str, body: str, *, brand: str, nav_links: Iterable[tuple[str, str]] = (),
-         here: str = "", narrow: bool = False) -> str:
+         here: str = "", narrow: bool = False, nonce: str = "") -> str:
     current = ' aria-current="page"'
     links = "".join(
         f'<a href="{esc(href)}"{current if href == here else ""}>{esc(label)}</a>'
         for label, href in nav_links)
     cls = "wrap narrow" if narrow else "wrap"
+    n = f' nonce="{esc(nonce)}"' if nonce else ""
     return (
         f"<!doctype html><html lang=\"en\"><head>"
         f"<meta charset=\"utf-8\">"
         f"<title>{esc(title)} — {esc(brand)}</title>"
         f'<meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<meta name="robots" content="noindex">'
-        f"{FONTS}<style>{BRAND_CSS}</style></head><body>"
+        f"{FONTS}<style{n}>{BRAND_CSS}</style></head><body>"
         f'<nav><div class="wrap"><a class="brand" href="/">{esc(brand)}</a>{links}</div></nav>'
         f'<div class="{cls}">{body}'
         f'<footer>{esc(brand)} · every shot begins and ends on a real photograph</footer>'
-        f"</div></body></html>")
+        f"</div><script{n}>{AUTOSUBMIT_JS}</script></body></html>")
 
 
 def flash(message: str, kind: str = "err") -> str:

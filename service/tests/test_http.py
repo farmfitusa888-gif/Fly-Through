@@ -945,3 +945,123 @@ def test_the_disclosure_url_is_fixed_before_the_render(tmp_path, monkeypatch):
     oid = _deliver_rooms_order(c, app, write_page=False)
     assert seen["url"].endswith(f"/o/{oid}/originals")
     assert seen["url"].startswith("http")
+
+
+# --------------------------------------------------------- open redirect
+
+
+# CRLF is covered by the direct test below instead: httpx refuses to transmit a
+# raw carriage return, so it cannot be exercised through the client at all.
+@pytest.mark.parametrize("evil", [
+    "//evil.com",
+    "///evil.com",
+    "/\\evil.com",
+    "\\\\evil.com",
+    "https://evil.com",
+    "//evil.com/%2f..",
+])
+def test_sign_in_cannot_be_bounced_to_another_site(client, app, evil):
+    """startswith("/") was the whole check, and "//evil.com" passes it — a
+    browser reads a protocol-relative URL as absolute. An attacker mails a
+    victim /login?next=//evil.com, the victim signs in with US, and lands on the
+    attacker's page still believing they are on ours."""
+    client.post("/login", data={"email": "a@b.com", "next": evil})
+    tok = app.state.mailer.outbox()[-1].body.split("token=")[1].split("&")[0].split()[0]
+    r = client.get(f"/auth?token={tok}&next={evil}", follow_redirects=False)
+    loc = r.headers["location"]
+    assert loc == "/orders", f"redirected to {loc!r}"
+
+
+def test_a_real_internal_next_still_works(client, app):
+    """The fix must not break the reason the parameter exists."""
+    client.post("/login", data={"email": "a@b.com", "next": "/orders"})
+    tok = app.state.mailer.outbox()[-1].body.split("token=")[1].split("&")[0].split()[0]
+    r = client.get(f"/auth?token={tok}&next=/order%3Fsku%3Dre-listing-pro",
+                   follow_redirects=False)
+    assert r.headers["location"].startswith("/order")
+
+
+@pytest.mark.parametrize("evil,expected", [
+    ("//evil.com", "/orders"),
+    ("///evil.com", "/orders"),
+    ("/\\evil.com", "/orders"),
+    ("https://evil.com", "/orders"),
+    ("/orders\r\nSet-Cookie: x=1", "/orders"),
+    ("/orders\nX-Injected: 1", "/orders"),
+    ("", "/orders"),
+    (None, "/orders"),
+    ("/orders", "/orders"),
+    ("/order?sku=re-listing-pro", "/order?sku=re-listing-pro"),
+    ("  /orders  ", "/orders"),
+])
+def test_safe_next_directly(evil, expected):
+    """Tested at the function because the client cannot send some of these --
+    and a header-splitting payload is exactly the case a client would sanitise
+    away, leaving the guard untested."""
+    from flythrough_service.app import safe_next
+    assert safe_next(evil) == expected
+
+
+# ------------------------------------------------------- security headers
+
+
+HEADERS = {
+    "content-security-policy": None,
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "x-frame-options": "DENY",
+}
+
+
+@pytest.mark.parametrize("path", ["/", "/login", "/partner/join", "/healthz"])
+def test_every_response_carries_the_security_headers(client, path):
+    """The static site gets these from _headers, which the app never sees. Every
+    page a customer actually transacts on was the one without them."""
+    r = client.get(path)
+    for name, value in HEADERS.items():
+        got = r.headers.get(name)
+        assert got, f"{path} has no {name}"
+        if value:
+            assert got == value
+
+
+def test_the_csp_has_no_unsafe_inline(client):
+    """A policy with 'unsafe-inline' stops almost nothing, and the whole reason
+    to have one is that an escaping mistake elsewhere does not become script
+    execution."""
+    csp = client.get("/").headers["content-security-policy"]
+    assert "unsafe-inline" not in csp and "unsafe-eval" not in csp
+    assert "script-src 'nonce-" in csp
+    assert "frame-ancestors 'none'" in csp
+    assert "object-src 'none'" in csp
+    assert "base-uri 'none'" in csp
+
+
+def test_the_nonce_changes_every_response(client):
+    """A fixed nonce is the same thing as no nonce."""
+    a = client.get("/").headers["content-security-policy"]
+    b = client.get("/").headers["content-security-policy"]
+    assert a != b
+
+
+def test_the_page_carries_no_inline_event_handlers(client, app):
+    """These are what force 'unsafe-inline'. The auto-submit moved into a
+    nonce'd script so the policy could stay strict."""
+    sign_in(client, app)
+    oid = start_order(client)
+    html = client.get(f"/shoot/{oid}").text
+    for attr in ("onchange=", "onclick=", "onload=", "onsubmit=", "onerror="):
+        assert attr not in html, f"inline {attr} would need unsafe-inline"
+
+
+def test_the_nonce_in_the_header_matches_the_page(client):
+    """A nonce that does not match is a page whose own styles are blocked."""
+    r = client.get("/")
+    nonce = r.headers["content-security-policy"].split("'nonce-")[1].split("'")[0]
+    assert f'nonce="{nonce}"' in r.text
+
+
+def test_hsts_only_in_production(client, tmp_path, monkeypatch):
+    """Sending HSTS from a dev server on http pins a name to https on the
+    developer's own machine."""
+    assert "strict-transport-security" not in client.get("/").headers

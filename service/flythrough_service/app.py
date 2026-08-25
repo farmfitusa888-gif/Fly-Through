@@ -89,6 +89,25 @@ def provider_from_env():
         "Add it in pipeline/flythrough/providers/ and wire it here.")
 
 
+def safe_next(target: str) -> str:
+    """Where a sign-in may send someone. Strict allow-shape, not a blocklist.
+
+    `startswith("/")` is not enough and was the bug: "//evil.com" passes it,
+    and a browser reads a protocol-relative URL as an absolute one. So an
+    attacker could mail a victim /login?next=//evil.com, the victim signs in
+    with us, and lands on the attacker's page still believing they are on
+    ours -- a credible phishing hop wearing our domain.
+
+    Backslashes are rejected too: some browsers normalise "/\\evil.com" to
+    the same thing.
+    """
+    t = (target or "").strip()
+    if (not t.startswith("/") or t.startswith("//") or t.startswith("/\\")
+            or "\\" in t or "\n" in t or "\r" in t):
+        return "/orders"
+    return t
+
+
 def create_app(settings: Settings | None = None, *, renderer=None,
                start_worker: bool = False) -> FastAPI:
     s = settings or load()
@@ -103,6 +122,46 @@ def create_app(settings: Settings | None = None, *, renderer=None,
 
     app = FastAPI(title=s.brand, docs_url=None, redoc_url=None,
                   openapi_url=None)
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        """Set on every response, including errors and file downloads.
+
+        The static site gets these from _headers, which the app never sees --
+        so without this middleware every page the customer actually transacts
+        on was the one without protection.
+
+        The CSP uses a per-response nonce rather than 'unsafe-inline'. A policy
+        with unsafe-inline stops almost nothing, and the entire reason to have
+        one is that an escaping mistake somewhere else does not become script
+        execution.
+        """
+        request.state.nonce = secrets.token_urlsafe(16)
+        response = await call_next(request)
+        n = request.state.nonce
+        response.headers.setdefault("Content-Security-Policy", "; ".join([
+            "default-src 'self'",
+            f"script-src 'nonce-{n}'",
+            f"style-src 'nonce-{n}' https://fonts.googleapis.com",
+            "font-src https://fonts.gstatic.com",
+            "img-src 'self' data:",
+            # Payment leaves for Stripe's own checkout; nothing posts anywhere else.
+            "form-action 'self' https://buy.stripe.com https://checkout.stripe.com",
+            "frame-ancestors 'none'",     # nothing here should ever be framed
+            "base-uri 'none'",
+            "object-src 'none'",
+        ]))
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy",
+                                    "strict-origin-when-cross-origin")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault(
+            "Permissions-Policy", "geolocation=(), microphone=(), camera=(self)")
+        if not s.dev_mode:
+            response.headers.setdefault(
+                "Strict-Transport-Security",
+                "max-age=31536000; includeSubDomains")
+        return response
     app.state.settings, app.state.db = s, db
     app.state.store, app.state.mailer, app.state.worker = store, mailer, worker
 
@@ -126,7 +185,8 @@ def create_app(settings: Settings | None = None, *, renderer=None,
     def render_page(request, title, body, *, narrow=False):
         p = who(request)
         return HTMLResponse(page(title, body, brand=s.brand, nav_links=nav(p),
-                                 here=request.url.path, narrow=narrow))
+                                 here=request.url.path, narrow=narrow,
+                                 nonce=getattr(request.state, "nonce", "")))
 
     def require(request: Request):
         p = who(request)
@@ -506,7 +566,7 @@ def create_app(settings: Settings | None = None, *, renderer=None,
         ref = request.cookies.get(REFERRAL_COOKIE)
         if ref and principal.customer_id:
             reseller.attribute(db, principal.customer_id, ref)
-        target = next if next.startswith("/") else "/orders"
+        target = safe_next(next)
         if principal.is_reseller:
             target = "/partner"
         resp = RedirectResponse(target, 303)
@@ -767,7 +827,7 @@ def create_app(settings: Settings | None = None, *, renderer=None,
                 f'enctype="multipart/form-data">{csrf_field(request)}'
                 f'<input type="hidden" name="slot" value="{esc(key)}">'
                 f'<input type="file" name="files" accept="image/*" '
-                f'capture="environment" onchange="this.form.submit()">'
+                f'capture="environment" data-autosubmit>'
                 f'</form></li>')
 
         missing = [k for k in needed if k not in have]

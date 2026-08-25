@@ -95,8 +95,14 @@ def transition(conn: sqlite3.Connection, db: Database, order_id: str,
         return                               # idempotent: webhook redelivery
     if to not in TRANSITIONS.get(frm, ()):
         raise OrderError(f"cannot go {frm} -> {to}")
-    stamp = {"paid": "paid_at", "delivered": "delivered_at"}.get(to)
+    # The only f-string in any SQL statement in this codebase. `stamp` comes
+    # from the literal dict below and can never be anything else -- but the
+    # assert is here so a future edit that makes it user-reachable fails loudly
+    # instead of becoming an injection.
+    STAMPS = {"paid": "paid_at", "delivered": "delivered_at"}
+    stamp = STAMPS.get(to)
     if stamp:
+        assert stamp in ("paid_at", "delivered_at")
         conn.execute(f"UPDATE orders SET status = ?, {stamp} = ? WHERE id = ?",
                      (to, now(), order_id))
     else:
