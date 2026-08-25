@@ -754,3 +754,80 @@ def test_outcome_summary_counts_only_answers(db, customer):
     oc.record(db, o, "sold in 14 days")
     s = oc.summary(db)
     assert s["answered"] == 1 and s["asked"] == 1 and s["response_rate"] == 1.0
+
+
+# ---------------------------------------------------------------- payouts
+
+
+def test_only_partners_over_the_minimum_appear(db, customer):
+    rid, code = _enrol(db)
+    reseller.attribute(db, customer, code)
+    o = orders.create(db, customer, "veh-walkaround-3")      # $117 -> $29.25
+    payments.handle(db, _event("e1", o, amount=11700))
+    assert reseller.payable(db, payout_minimum_cents=5000) == []
+    o2 = orders.create(db, customer, "re-signature")          # $399 -> $99.75
+    payments.handle(db, _event("e2", o2, amount=39900))
+    owed = reseller.payable(db, payout_minimum_cents=5000)
+    assert len(owed) == 1 and owed[0]["owed"] == 2925 + 9975
+
+
+def test_marking_paid_settles_everything_accrued(db, customer):
+    rid, code = _enrol(db)
+    reseller.attribute(db, customer, code)
+    for i in range(3):
+        o = orders.create(db, customer, "re-listing-pro")
+        payments.handle(db, _event(f"e{i}", o))
+    assert reseller.mark_paid(db, rid, reference="BACS 001") == 3 * 6225
+    led = reseller.ledger(db, rid, payout_minimum_cents=0)
+    assert led.paid_cents == 3 * 6225 and led.accrued_cents == 0
+
+
+def test_paying_twice_pays_nothing_the_second_time(db, customer):
+    rid, code = _enrol(db)
+    reseller.attribute(db, customer, code)
+    o = orders.create(db, customer, "re-listing-pro")
+    payments.handle(db, _event("e1", o))
+    assert reseller.mark_paid(db, rid) == 6225
+    assert reseller.mark_paid(db, rid) == 0
+
+
+def test_a_commission_accrued_after_a_payout_is_still_owed(db, customer):
+    """The next payout must pick it up, not swallow it into the last one."""
+    rid, code = _enrol(db)
+    reseller.attribute(db, customer, code)
+    o1 = orders.create(db, customer, "re-listing-pro")
+    payments.handle(db, _event("e1", o1))
+    reseller.mark_paid(db, rid)
+    o2 = orders.create(db, customer, "re-listing-pro")
+    payments.handle(db, _event("e2", o2))
+    led = reseller.ledger(db, rid, payout_minimum_cents=0)
+    assert led.accrued_cents == 0 and led.payable_cents == 6225
+    assert led.paid_cents == 6225
+
+
+def test_a_paid_commission_is_not_reversed_by_a_later_refund(db, customer):
+    """Money already sent cannot be un-sent by a status change. It becomes a
+    conversation, not a silent ledger edit."""
+    rid, code = _enrol(db)
+    reseller.attribute(db, customer, code)
+    o = orders.create(db, customer, "re-listing-pro")
+    payments.handle(db, _event("e1", o))
+    reseller.mark_paid(db, rid)
+    payments.handle(db, {"id": "e2", "type": "charge.refunded",
+                         "data": {"object": {"metadata": {"order_id": o}}}})
+    with db.tx() as c:
+        row = c.execute("SELECT status FROM commissions WHERE order_id=?",
+                        (o,)).fetchone()
+    assert row["status"] == "paid"
+
+
+def test_a_payout_is_recorded_in_the_audit_log(db, customer):
+    rid, code = _enrol(db)
+    reseller.attribute(db, customer, code)
+    o = orders.create(db, customer, "re-listing-pro")
+    payments.handle(db, _event("e1", o))
+    reseller.mark_paid(db, rid, reference="BACS 12345")
+    with db.tx() as c:
+        row = c.execute("SELECT detail FROM events WHERE kind='commission.paid'"
+                        " AND subject=?", (rid,)).fetchone()
+    assert row and "BACS 12345" in row["detail"]

@@ -737,3 +737,49 @@ def test_another_customer_cannot_open_the_shot_list(client, app):
     client.cookies.clear()
     sign_in(client, app, "second@example.com")
     assert "Not found" in client.get(f"/shoot/{oid}").text
+
+
+# --------------------------------------------------------------- payouts UI
+
+
+def test_payouts_page_is_operator_only(app_with_operator):
+    c = TestClient(app_with_operator)
+    sign_in(c, app_with_operator, "buyer@example.com")
+    assert c.get("/admin/payouts").status_code == 404
+    c.cookies.clear()
+    sign_in(c, app_with_operator, "boss@flythrough.test")
+    assert c.get("/admin/payouts").status_code == 200
+
+
+def test_recording_a_payout_tells_the_partner(app_with_operator):
+    c = TestClient(app_with_operator)
+    app = app_with_operator
+    c.post("/partner/join", data={"name": "Sam", "email": "sam@p.com"})
+    with app.state.db.tx() as x:
+        code = x.execute("SELECT code FROM resellers").fetchone()["code"]
+        rid = x.execute("SELECT id FROM resellers").fetchone()["id"]
+    c.get(f"/?ref={code}")
+    sign_in(c, app, "buyer@example.com")
+    oid = start_order(c)
+    _pay(c, oid)
+    c.cookies.clear()
+
+    sign_in(c, app, "boss@flythrough.test")
+    page = c.get("/admin/payouts").text
+    assert "sam@p.com" in page and "$62.25" in page
+    csrf = page.split('name="csrf" value="')[1].split('"')[0]
+    c.post("/admin/payouts", data={"reseller_id": rid, "reference": "BACS 9",
+                                   "csrf": csrf}, follow_redirects=False)
+
+    subs = [m.subject for m in app.state.mailer.outbox() if m.to == "sam@p.com"]
+    assert any("commission paid" in s for s in subs), subs
+    from flythrough_service import reseller
+    assert reseller.ledger(app.state.db, rid,
+                           payout_minimum_cents=0).paid_cents == 6225
+
+
+def test_a_payout_cannot_be_posted_without_csrf(app_with_operator):
+    c = TestClient(app_with_operator)
+    sign_in(c, app_with_operator, "boss@flythrough.test")
+    assert c.post("/admin/payouts",
+                  data={"reseller_id": "res_x", "csrf": "no"}).status_code == 404

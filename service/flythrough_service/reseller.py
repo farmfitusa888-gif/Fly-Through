@@ -159,6 +159,50 @@ def reverse(conn: sqlite3.Connection, db: Database, order_id: str) -> int:
     return row["amount_cents"]
 
 
+def payable(db: Database, *, payout_minimum_cents: int) -> list[dict]:
+    """Everyone owed at least the minimum, with what they are owed.
+
+    Grouped by reseller and computed from the ledger rather than carried as a
+    running balance. A stored balance is a number that can disagree with the
+    rows that produced it, and the first time it does, nobody can tell which one
+    is right.
+    """
+    with db.tx() as c:
+        rows = c.execute(
+            "SELECT r.id, r.name, r.email, r.code,"
+            "       COALESCE(sum(cm.amount_cents), 0) owed,"
+            "       count(cm.id) n"
+            " FROM resellers r JOIN commissions cm ON cm.reseller_id = r.id"
+            " WHERE cm.status = 'accrued'"
+            " GROUP BY r.id HAVING owed >= ?"
+            " ORDER BY owed DESC", (payout_minimum_cents,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_paid(db: Database, reseller_id: str, *, reference: str = "") -> int:
+    """Settle everything currently accrued for one reseller.
+
+    Returns cents marked paid. Reads and writes in ONE transaction so a
+    commission accrued while a payout is being recorded is not silently included
+    in a payment that did not cover it -- the classic way a ledger and a bank
+    statement drift apart.
+    """
+    with db.tx() as c:
+        rows = c.execute(
+            "SELECT id, amount_cents FROM commissions"
+            " WHERE reseller_id = ? AND status = 'accrued'",
+            (reseller_id,)).fetchall()
+        if not rows:
+            return 0
+        total = sum(r["amount_cents"] for r in rows)
+        c.executemany("UPDATE commissions SET status='paid', paid_at=?"
+                      " WHERE id = ? AND status='accrued'",
+                      [(now(), r["id"]) for r in rows])
+        db.log(c, "commission.paid", reseller_id,
+               f"{total} {reference}".strip())
+    return total
+
+
 def ledger(db: Database, reseller_id: str, *, payout_minimum_cents: int) -> Ledger:
     with db.tx() as c:
         rows = c.execute(

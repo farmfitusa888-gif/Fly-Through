@@ -805,6 +805,52 @@ def create_app(settings: Settings | None = None, *, renderer=None,
             return Response("Not found", status_code=404)
         return RedirectResponse(f"/o/{order_id}?done=1", 303)
 
+    @app.get("/admin/payouts", response_class=HTMLResponse)
+    def admin_payouts(request: Request):
+        if not is_operator(request):
+            return Response("Not found", status_code=404)
+        floor = int(s.payout_minimum_usd * 100)
+        owed = reseller.payable(db, payout_minimum_cents=floor)
+        rows = "".join(
+            f'<tr><td class="k">{esc(r["name"])}</td>'
+            f'<td class="mono">{esc(r["email"])}</td>'
+            f'<td class="mono">{esc(r["code"])}</td>'
+            f'<td>{r["n"]}</td>'
+            f'<td>{esc(money(r["owed"]))}</td>'
+            f'<td><form method="post" action="/admin/payouts">'
+            f'{csrf_field(request)}'
+            f'<input type="hidden" name="reseller_id" value="{esc(r["id"])}">'
+            f'<input name="reference" placeholder="bank ref" '
+            f'style="margin:0 0 8px">'
+            f'<button>Mark paid</button></form></td></tr>' for r in owed)
+        total = sum(r["owed"] for r in owed)
+        body = (f'<h1>Payouts</h1>'
+                f'<p class="lede">Everyone over the '
+                f'{esc(money(floor))} minimum. Pay them by bank transfer, then '
+                f'record it here — this is the ledger, not the payment rail.</p>'
+                + (f'<table><tr><th>Partner</th><th>Email</th><th>Code</th>'
+                   f'<th>Orders</th><th>Owed</th><th></th></tr>{rows}</table>'
+                   f'<p class="note">Total outstanding {esc(money(total))}.</p>'
+                   if owed else '<p class="note">Nobody is over the minimum.</p>'))
+        return render_page(request, "Payouts", body)
+
+    @app.post("/admin/payouts")
+    def admin_pay(request: Request, reseller_id: str = Form(...),
+                  reference: str = Form(""), csrf: str = Form("")):
+        if not is_operator(request) or not check_csrf(request, csrf):
+            return Response("Not found", status_code=404)
+        paid = reseller.mark_paid(db, reseller_id, reference=reference[:80])
+        if paid:
+            with db.tx() as c:
+                row = c.execute("SELECT email FROM resellers WHERE id=?",
+                                (reseller_id,)).fetchone()
+            if row:
+                mailer.send(row["email"], f"{s.brand} — commission paid",
+                            f"${paid / 100:,.2f} is on its way to you"
+                            + (f" (ref {reference[:80]})." if reference else ".")
+                            + f"\n\nYour ledger: {s.base_url}/partner\n")
+        return RedirectResponse("/admin/payouts", 303)
+
     @app.post("/admin/ask")
     def admin_ask(request: Request, csrf: str = Form("")):
         """Send the outstanding "did it sell?" asks. Operator-triggered rather
@@ -856,7 +902,8 @@ def create_app(settings: Settings | None = None, *, renderer=None,
                 f'<div class="l">Ready to ask</div></div></div>'
                 f'<form method="post" action="/admin/ask">'
                 f'{csrf_field(request)}'
-                f'<button>Ask the {pending} due</button></form>')
+                f'<button>Ask the {pending} due</button></form>'
+                f'<p class="note"><a href="/admin/payouts">Partner payouts →</a></p>')
         return render_page(request, "Queue", body)
 
     @app.get("/healthz")
