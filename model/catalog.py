@@ -47,7 +47,7 @@ CR_PER_SEC = rate("wan2-7", "1080p")
 INTAKE = {
     "rooms": [
         "Property address (as it appears on the listing)",
-        "Brokerage name -- it goes on the disclosure page",
+        "Brokerage name \u2014 it goes on the disclosure page",
         "Link to the photos (Dropbox, Drive, Google Photos, anything)",
         "Daylight, golden hour or twilight",
     ],

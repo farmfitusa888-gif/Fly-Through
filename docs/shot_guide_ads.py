@@ -233,13 +233,20 @@ and deliver the next day.
 """
 
 
+def _prose(text: str) -> str:
+    """These files are read by clients, not developers. A double hyphen is an
+    editing convention, not punctuation -- it renders literally as "--" in the
+    published page, which looks like a typo to the person following the guide."""
+    return text.replace(" -- ", " \u2014 ")
+
+
 def main() -> int:
     files = {
         "shot-guide-vehicle.md": vehicle_guide(),
         "shot-guide-product.md": product_guide(),
     }
     for name, body in files.items():
-        (OUT / name).write_text(body)
+        (OUT / name).write_text(_prose(body))
         print(f"  wrote {name}  ({len(body.splitlines())} lines)")
 
     # Acceptance: every key named in a guide must resolve through its own module,

@@ -270,6 +270,13 @@ def checklist() -> str:
 """
 
 
+def _prose(text: str) -> str:
+    """These files are read by clients, not developers. A double hyphen is an
+    editing convention, not punctuation -- it renders literally as "--" in the
+    published page, which looks like a typo to the person following the guide."""
+    return text.replace(" -- ", " \u2014 ")
+
+
 def main() -> int:
     files = {
         "shot-guide-agent.md": agent_guide(),
@@ -277,7 +284,7 @@ def main() -> int:
         "shot-guide-checklist.md": checklist(),
     }
     for name, body in files.items():
-        (OUT / name).write_text(body)
+        (OUT / name).write_text(_prose(body))
         print(f"  wrote {name}  ({len(body.splitlines())} lines)")
 
     # Acceptance criterion: every room named in the guide must resolve.
