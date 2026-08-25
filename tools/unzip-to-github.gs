@@ -24,8 +24,10 @@
  *      Repository access: only farmfitusa888-gif/Fly-Through
  *      Permissions: Contents = Read and write.  Nothing else.
  *   4. Run  ->  dryRun  first, to confirm the archive expands at all
- *   5. Run  ->  main.  Authorise when asked (it is your own Drive).
- *   6. Delete the token when the run finishes. It is one job, not a standing key.
+ *   5. Run  ->  fetchOriginals  (six small images, no archive involved --
+ *                            this one is not affected by the size ceiling)
+ *   6. Run  ->  main.  Authorise when asked (it is your own Drive).
+ *   7. Delete the token when the run finishes. It is one job, not a standing key.
  *
  * The token sits in a script only you can open. It is still a credential:
  * scope it to this one repository, and revoke it afterwards.
@@ -42,6 +44,26 @@ var ZIP_NAME = 'openart-download (3).zip';
 // Every clip here is 2-6 MB, so anything larger is a sign the archive holds
 // something we did not expect -- report it rather than push it.
 var MAX_BYTES = 50 * 1024 * 1024;
+
+/**
+ * The six source stills the 1420 Cedar Ridge film was built from. They live on
+ * OpenArt's CDN, which the build environment cannot reach -- but Google's
+ * servers can, which is the whole reason this runs here.
+ *
+ * These are the images the demo film was generated FROM. That is exactly what
+ * an originals page is required to show: the unaltered source, not a frame
+ * lifted out of the finished video. For a paying client the same slot holds
+ * their own photographs, untouched.
+ */
+var ORIGINALS_DEST = 'samples/1420-cedar-ridge/delivery/originals';
+var ORIGINALS = [
+  {name: '01_exterior.png', url: 'https://cdn.openart.ai/openart-ai/production/2026-08/create-image/V0CbPyLdg5HOHc1h6Y50/image_1787274941423_fc5e415d_1787274942042_668d08cb.png'},
+  {name: '02_entry.png', url: 'https://cdn.openart.ai/openart-ai/production/2026-08/create-image/V0CbPyLdg5HOHc1h6Y50/image_1787275038121_872e3016_1787275038819_abe97c5d.png'},
+  {name: '03_living.png', url: 'https://cdn.openart.ai/openart-ai/production/2026-08/create-image/V0CbPyLdg5HOHc1h6Y50/image_1787275500613_ce5596a5_1787275501072_16c56dd3.png'},
+  {name: '04_kitchen.png', url: 'https://cdn.openart.ai/openart-ai/production/2026-08/create-image/V0CbPyLdg5HOHc1h6Y50/image_1787275505692_5641dfc0_1787275506491_f96f103c.png'},
+  {name: '05_patio.png', url: 'https://cdn.openart.ai/openart-ai/production/2026-08/create-image/V0CbPyLdg5HOHc1h6Y50/image_1787275514691_38e72198_1787275515417_3242907c.png'},
+  {name: '06_aerial.png', url: 'https://cdn.openart.ai/openart-ai/production/2026-08/create-image/V0CbPyLdg5HOHc1h6Y50/image_1787276674291_447bba24_1787276675230_30a604bf.png'}
+];
 
 function main() {
   if (!GITHUB_TOKEN) {
@@ -102,6 +124,47 @@ function main() {
   Logger.log('---');
   Logger.log('pushed %s, non-video skipped %s, failed %s', pushed, skipped, failed);
   Logger.log('Now tell Claude to pull the branch.');
+}
+
+/**
+ * Fetch the six source stills and commit them.
+ *
+ * Independent of main(): it touches no archive, so the Apps Script blob ceiling
+ * does not apply. Run this even if the unzip refuses -- it unblocks the
+ * disclosure page on its own, and that is the thing standing between the
+ * property film and being deliverable.
+ */
+function fetchOriginals() {
+  if (!GITHUB_TOKEN) {
+    throw new Error('Set GITHUB_TOKEN first. See the SETUP notes at the top.');
+  }
+  var ok = 0, bad = 0;
+  for (var i = 0; i < ORIGINALS.length; i++) {
+    var item = ORIGINALS[i];
+    try {
+      var res = UrlFetchApp.fetch(item.url, {muteHttpExceptions: true});
+      if (res.getResponseCode() !== 200) {
+        Logger.log('FAIL  %s  HTTP %s', item.name, res.getResponseCode());
+        bad++;
+        continue;
+      }
+      var bytes = res.getBlob().getBytes();
+      var result = putFile_(ORIGINALS_DEST + '/' + item.name, bytes);
+      Logger.log('%s  %s  (%s KB)', result, item.name,
+                 (bytes.length / 1024).toFixed(0));
+      ok++;
+    } catch (err) {
+      Logger.log('FAIL  %s  %s', item.name, err.message);
+      bad++;
+    }
+  }
+  Logger.log('---');
+  Logger.log('originals: %s pushed, %s failed', ok, bad);
+  if (bad) {
+    Logger.log('A 403 or 404 means the CDN link has expired. Re-download the');
+    Logger.log('images from your OpenArt history and upload them by hand to');
+    Logger.log('%s instead.', ORIGINALS_DEST);
+  }
 }
 
 function findZip_() {

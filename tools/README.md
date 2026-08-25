@@ -30,6 +30,35 @@ that prefixes each filename, so an unsorted folder still lands in cut order.
 
 Then: `python3 samples/cars/build.py status`
 
+## `fetchOriginals()` — the other half, and the easier one
+
+The six source stills for 1420 Cedar Ridge live on OpenArt's CDN, which this
+build environment cannot reach. **Google's servers can.** So the same script
+pulls them and commits them to
+`samples/1420-cedar-ridge/delivery/originals/`.
+
+Run this **even if the unzip refuses**. It touches no archive, so the blob
+ceiling does not apply — it is six small images over HTTP. On its own it
+unblocks the disclosure page, which is the thing currently standing between the
+property film and being deliverable at all.
+
+These are the images the demo film was generated *from*. That is exactly what an
+originals page must show: the unaltered source, never a frame lifted out of the
+finished video. For a paying client the same slot holds their own photographs,
+untouched.
+
+If a link returns 403 or 404 the CDN URL has expired — re-download from your
+OpenArt history and upload by hand.
+
+## What is verified, and what is not
+
+| Part | Status |
+|---|---|
+| Zip filtering, flattening, `.mov`→`.mp4`, junk skipping | **Verified** against a rebuilt archive with the real filenames, nested dirs and a `.DS_Store` |
+| Manifest ids survive the rename | **Verified** — `36199589`, `98869283` recovered |
+| GitHub read-sha then write-with-sha | **Verified** against this live branch and path |
+| `Utilities.unzip` on a 300 MB blob | **Not verified.** Cannot be, from here. This is the platform ceiling `dryRun()` exists to test. |
+
 ## The token
 
 Fine-grained, this repository only, **Contents: Read and write**, nothing else.
