@@ -82,6 +82,9 @@ Sources: [Luxury Presence](https://www.luxurypresence.com/blogs/real-estate-vide
 
 Sources: [NorthstarMLS](https://northstarmls.com/insights/guidelines-for-virtual-staging-and-ai-enhanced-listing-photos/) ·
 [CA AB 723 bill text](https://leginfo.legislature.ca.gov/faces/billNavClient.xhtml?bill_id=202520260AB723) ·
+[FTC Reviews & Testimonials rulemaking](https://www.ftc.gov/legal-library/browse/rules/rulemaking-use-consumer-reviews-testimonials) ·
+[FTC Q&A on the rule](https://www.ftc.gov/business-guidance/resources/consumer-reviews-testimonials-rule-questions-answers) ·
+[16 CFR Part 465 final rule](https://www.ftc.gov/legal-library/browse/federal-register-notices/16-cfr-part-465-trade-regulation-rule-use-consumer-reviews-testimonials-final-rule) ·
 [SDMLS](https://sdmls.com/ab-723-digitally-altered-images-sdmls-requirements/) ·
 [PSAR](https://blog.psar.org/navigating-ab-723-new-photo-disclosure-rules) ·
 [WAV Group](https://www.wavgroup.com/2025/11/19/californias-new-photo-disclosure-law-and-what-it-means-for-mlss-and-brokerages/) ·
