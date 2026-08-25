@@ -2,13 +2,29 @@
 
 ## `unzip-to-github.gs` — get the OpenArt archive into the repo
 
-The clips have always been *in* the zip. The zip is what cannot move:
+The clips have always been *in* the zip. The zip is what cannot move.
 
-| Route | Why it fails |
+**Re-checked 2026-08-25, end to end.** The file is real and it was found:
+`FLY THROUGH/openart-download (3).zip`, id `1z9soCBQQdvzqXMKMmwKyIv7rHUALdVsv`,
+**300,741,846 bytes**. Every route out of it was retried rather than assumed:
+
+| Route | Result on 2026-08-25 |
 |---|---|
-| Drive connector download | Hard cap of **10 MB per file**; the archive is **300 MB** |
-| `drive.google.com` direct | CONNECT refused **403** by the build environment's egress policy |
-| Individual clips from Drive | Would work — each is 2–6 MB — but only the archive is in Drive |
+| Drive connector download | Returns the file as **base64 in a tool response**. 300 MB becomes ~400 MB of text, hundreds of times the response limit, and the connector has no range or partial read. It is a document channel, not a binary one. |
+| `drive.google.com` direct | CONNECT refused **403** at the egress gateway |
+| `cdn.openart.ai` direct | CONNECT refused **403** at the egress gateway. `/root/.ccr/README.md` is explicit: a 403 is an organization policy denial, report it, do not route around it. |
+| Individual clips from Drive | Same base64 wall as the archive — a single 2 MB clip is still ~2.7 MB of text |
+
+What *did* work, and is new: the **OpenArt MCP tools**. `openart_creation_list`
+returns every generation's id, filename, prompt, model, duration and status. All
+fifteen car beats are there and `completed`, and the URLs it returns match
+`samples/cars/manifest.json` exactly — so the manifest is verified against the
+live account rather than trusted. It returns metadata, not bytes; the bytes are
+still behind the blocked CDN.
+
+The upshot is that we know precisely which files are missing.
+**`python3 samples/cars/build.py needed`** writes `samples/cars/NEEDED.md`: ten
+files, by name, with the cut each one is. That is the list to work from.
 
 This Apps Script runs inside Google's own servers, where neither wall applies.
 It expands the archive in place and commits each video to the branch through the

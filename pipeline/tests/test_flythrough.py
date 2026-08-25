@@ -1355,3 +1355,66 @@ def test_every_vertical_names_its_own_subject_and_sidecar():
         seen_subject.add(s.subject)
         seen_sidecar.add(s.sidecar)
         assert s.required_anchors and s.hero_order and s.establishing
+
+
+def test_a_vertical_cut_keeps_a_wide_subject_whole(tmp_path):
+    """Watching a real vehicle film found this: the 9:16 cut centre-cropped the
+    master, and the middle 9:16 of a side-on car is its doors. The nose and the
+    tail left the frame entirely, on the format the car is actually advertised
+    in. A room survives that crop because the walls run past the frame edge; a
+    car is a wide object sitting in the middle of a wide picture."""
+    from flythrough.assemble import to_vertical, probe_duration
+    from flythrough.contactsheet import probe_size
+    src = tmp_path / "master.mp4"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+                    "-i", "testsrc2=s=1920x1080:d=1:r=30", "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p", str(src)], check=True)
+
+    crop = to_vertical(src, tmp_path / "crop.mp4", mode="crop")
+    fit = to_vertical(src, tmp_path / "fit.mp4", mode="fit")
+    for out in (crop, fit):
+        assert probe_size(out) == (1080, 1920)
+        assert probe_duration(out) > 0.9
+
+    with pytest.raises(ValueError):
+        to_vertical(src, tmp_path / "no.mp4", mode="letterbox")
+
+
+def test_the_edges_of_the_frame_survive_a_fit_cut_and_not_a_crop(tmp_path):
+    """The measurement behind the previous test. A master with a white bar at
+    each far edge -- where a car's nose and tail sit -- keeps both bars through
+    the fit cut and loses both through the crop."""
+    from flythrough.assemble import to_vertical
+    src = tmp_path / "wide.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+         "-i", "color=c=black:s=1920x1080:d=1:r=30",
+         "-vf", "drawbox=x=0:y=0:w=60:h=1080:color=white@1:t=fill,"
+                "drawbox=x=1860:y=0:w=60:h=1080:color=white@1:t=fill",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)], check=True)
+
+    def edges(video):
+        """Mean brightness of the far-left and far-right strips of one frame,
+        read as raw grey pixels rather than parsed out of ffmpeg's log."""
+        out = []
+        for x in (0, 1060):
+            r = subprocess.run(
+                ["ffmpeg", "-loglevel", "error", "-i", str(video),
+                 "-frames:v", "1", "-vf", f"crop=20:200:{x}:860,format=gray",
+                 "-f", "rawvideo", "-"], capture_output=True, check=True)
+            out.append(sum(r.stdout) / len(r.stdout))
+        return out
+
+    fit_l, fit_r = edges(to_vertical(src, tmp_path / "fit.mp4", mode="fit"))
+    crop_l, crop_r = edges(to_vertical(src, tmp_path / "crop.mp4", mode="crop"))
+    assert fit_l > 180 and fit_r > 180, (fit_l, fit_r)
+    assert crop_l < 60 and crop_r < 60, (crop_l, crop_r)
+
+
+def test_each_vertical_chooses_its_own_9x16_treatment():
+    """Rooms keeps the crop -- it was right for rooms and nothing about a car
+    should change what a listing film looks like."""
+    from flythrough import taxonomy
+    assert taxonomy.of("rooms").vertical_fit == "crop"
+    assert taxonomy.of("vehicles").vertical_fit == "fit"
+    assert taxonomy.of("products").vertical_fit == "fit"

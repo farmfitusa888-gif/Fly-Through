@@ -153,6 +153,11 @@ ESTABLISHING_ADVICE = (
 SIDECAR = "parts.json"
 UNIT, UNIT_PLURAL = "part", "parts"
 
+# A car is a wide subject in the middle of a wide frame.
+# The centre 9:16 of it is the doors -- the nose and tail leave the shot,
+# and the shape of the object is the whole reason anyone is watching.
+VERTICAL_FIT = "fit"
+
 UNKNOWN = "other"
 
 

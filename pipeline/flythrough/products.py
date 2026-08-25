@@ -157,6 +157,10 @@ ESTABLISHING_ADVICE = (
 SIDECAR = "facets.json"
 UNIT, UNIT_PLURAL = "view", "views"
 
+# Same as a vehicle: the object is the subject and it has
+# to stay whole in frame.
+VERTICAL_FIT = "fit"
+
 UNKNOWN = "other"
 
 

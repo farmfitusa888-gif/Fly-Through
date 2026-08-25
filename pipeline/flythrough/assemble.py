@@ -274,16 +274,46 @@ def concat(
     return out
 
 
-def to_vertical(master: str | Path, out: str | Path, *, width: int = 1080, height: int = 1920) -> Path:
-    """Re-frame the 16:9 master to 9:16 by centre-cropping the widescreen frame.
+# How a 16:9 master becomes 9:16. "crop" fills the frame from the middle of the
+# widescreen image; "fit" scales the whole frame in and fills the rest with a
+# blurred, magnified copy of itself.
+VERTICAL_MODES = ("crop", "fit")
 
-    Centre crop, not letterbox: a letterboxed listing video reads as recycled
-    landscape footage and gets scrolled past. Cropping keeps the frame full-bleed.
+
+def to_vertical(master: str | Path, out: str | Path, *, width: int = 1080,
+                height: int = 1920, mode: str = "crop") -> Path:
+    """Re-frame the 16:9 master to 9:16.
+
+    Centre crop is right for a room. The walls run past the edge of frame
+    anyway, so taking the middle 9:16 of the picture loses nothing and keeps it
+    full-bleed -- and a letterboxed listing video reads as recycled landscape
+    footage and gets scrolled past.
+
+    Centre crop is wrong for a vehicle, and watching one proved it: a car is a
+    wide subject photographed side-on, sitting in the middle of a wide frame,
+    and the middle 9:16 of that picture is the doors. The nose and the tail
+    leave the frame entirely. The whole point of the shot is the shape of the
+    object, and the crop removes the shape.
+
+    So "fit" scales the entire frame to the full width and fills the space above
+    and below with a blurred, magnified copy of itself. Still full-bleed, still
+    no black bars, and the car is still a car.
     """
+    if mode not in VERTICAL_MODES:
+        raise ValueError(f"unknown vertical mode {mode!r}; "
+                         f"choose from {VERTICAL_MODES}")
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
+    if mode == "crop":
+        vf = f"scale=-2:{height},crop={width}:{height}:(iw-{width})/2:0"
+    else:
+        vf = (f"split=2[bg][fg];"
+              f"[bg]scale={width}:{height}:force_original_aspect_ratio=increase,"
+              f"crop={width}:{height},gblur=sigma=42[bgb];"
+              f"[fg]scale={width}:-2[fgs];"
+              f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2")
     _run([FFMPEG, "-y", "-loglevel", "error", "-i", str(master),
-          "-vf", f"scale=-2:{height},crop={width}:{height}:(iw-{width})/2:0",
+          "-vf", vf,
           "-c:v", "libx264", "-crf", "18", "-preset", "medium",
           "-pix_fmt", "yuv420p", "-an", str(out)])
     return out
@@ -337,6 +367,7 @@ def deliver(
     make_vertical: bool = True,
     make_thumb: bool = True,
     trim: bool = True,
+    vertical_mode: str = "crop",
 ) -> Deliverables:
     """Produce the full delivery set from rendered shot clips.
 
@@ -359,7 +390,8 @@ def deliver(
     if music:
         master = add_music(master, music, outdir / f"{slug}_master_16x9_music.mp4")
 
-    vertical = to_vertical(master, outdir / f"{slug}_vertical_9x16.mp4") if make_vertical else None
+    vertical = (to_vertical(master, outdir / f"{slug}_vertical_9x16.mp4",
+                            mode=vertical_mode) if make_vertical else None)
     thumb = thumbnail(master, outdir / f"{slug}_thumb.jpg") if make_thumb else None
 
     # Web/MLS encodes are what actually get sent; the CRF-18 masters are archive.

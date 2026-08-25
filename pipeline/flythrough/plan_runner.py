@@ -20,6 +20,7 @@ from typing import Callable
 
 from .assemble import concat, deliver
 from .compliance import build_pack, check_placement
+from . import taxonomy as tx
 from .planner import build_plan
 from .render import OpenArtAdapter, build_jobs, submit_all
 
@@ -101,7 +102,8 @@ def render_order(
                         crossfade=0.5, fps=30), *clips[1:]]
         files.append(("disclosure", pack.page))
 
-    d = deliver(first, out_dir, slug=slug, crossfade=0.0, fps=30)
+    d = deliver(first, out_dir, slug=slug, crossfade=0.0, fps=30,
+                vertical_mode=tx.of(vertical).vertical_fit)
 
     if placement == "mark_end":
         pack = build_pack(listing, _photo_specs(originals), out_dir,

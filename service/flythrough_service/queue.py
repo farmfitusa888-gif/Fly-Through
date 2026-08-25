@@ -228,8 +228,10 @@ class Worker:
         # Sorted by filename, which is why the operator is told to name them
         # shot_01, shot_02. Cut order is the product; a shuffled delivery is
         # not a lesser version of it, it is a different film.
+        from flythrough import taxonomy as tx
         d = deliver(sorted(clips, key=lambda p: Path(p).name), out,
-                    slug=slug, crossfade=0.0, fps=30)
+                    slug=slug, crossfade=0.0, fps=30,
+                    vertical_mode=tx.of(o["vertical"]).vertical_fit)
 
         produced = [("master", Path(d.master_web or d.master))]
         if d.vertical:

@@ -67,6 +67,10 @@ class Spec:
     sidecar: str
     unit: str                 # what one photo is OF, for warning copy
     unit_plural: str
+    # How the 9:16 cut is made. A room survives a centre crop because the walls
+    # run past the frame edge; a car does not, because the middle 9:16 of a
+    # side-on car is its doors.
+    vertical_fit: str
 
 
 def of(which: str | ModuleType) -> Spec:
@@ -100,4 +104,5 @@ def of(which: str | ModuleType) -> Spec:
         sidecar=get("SIDECAR", "rooms.json"),
         unit=get("UNIT", "room"),
         unit_plural=get("UNIT_PLURAL", "rooms"),
+        vertical_fit=get("VERTICAL_FIT", "crop"),
     )
