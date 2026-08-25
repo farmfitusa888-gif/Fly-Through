@@ -137,6 +137,26 @@ PHRASES: dict[str, str] = {
 # One continuous circuit around the object -- never reverse mid-orbit.
 ALTERNATE_ORBIT = False
 
+# The prompt has to say what the subject IS. Left unset it fell back to room
+# language and a product film asked the model to preserve "architecture".
+SUBJECT = "the product"
+SUBJECT_NOUN = "product"
+PRESERVE = "shape, proportions, materials, finish, colour, logos and text"
+
+HERO_ORDER: tuple[str, ...] = ("hero", "front", "side", "in_use", "detail")
+
+LOW_VALUE: dict[str, int] = {
+    "size_chart": 5, "label": 5, "packaging": 4, "colorway": 4, "accessories": 4,
+}
+
+ESTABLISHING: tuple[str, ...] = ("hero", "front", "side", "back")
+ESTABLISHING_ADVICE = (
+    "A product film with no full view of the object opens on a detail of "
+    "something the viewer has not seen yet; request a hero shot.")
+
+SIDECAR = "facets.json"
+UNIT, UNIT_PLURAL = "view", "views"
+
 UNKNOWN = "other"
 
 

@@ -18,13 +18,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import products, rooms, vehicles
 from .assemble import concat, deliver
 from .compliance import build_pack, check_placement
 from .planner import build_plan
 from .render import OpenArtAdapter, build_jobs, submit_all
 
-TAXONOMY = {"rooms": rooms, "vehicles": vehicles, "products": products}
 
 # The style each vertical is cut in unless a brief overrides it.
 DEFAULT_STYLE = {"rooms": "goldenhour", "vehicles": "lot", "products": "studio"}
@@ -82,7 +80,7 @@ def render_order(
 
     chosen = style or _style_from_brief(brief) or DEFAULT_STYLE[vertical]
     plan = build_plan(originals, listing=listing, style=chosen,
-                      max_seconds=max_seconds)
+                      max_seconds=max_seconds, vertical=vertical)
 
     jobs = build_jobs(plan, adapter or OpenArtAdapter())
     urls = submit_all(jobs, submit=submit, poll=poll)

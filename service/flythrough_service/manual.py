@@ -116,7 +116,8 @@ def build(db, data_dir: Path, order_id: str, *, model: str = "wan2-7",
                or brief_answers.get("Product name") or order_id)
     style = _style(o["vertical"], brief_answers)
 
-    plan = build_plan(originals, listing=listing, style=style)
+    plan = build_plan(originals, listing=listing, style=style,
+                      vertical=o["vertical"])
     q = quote(seconds=plan.total_seconds, shots=len(plan.shots),
               model=model, tier=tier)
 

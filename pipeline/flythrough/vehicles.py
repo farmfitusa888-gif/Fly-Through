@@ -132,6 +132,27 @@ INTERIOR_NEGATIVE: tuple[str, ...] = (
     "gauge text changing", "extra pedals",
 )
 
+# Thumbnail preference. The hero three-quarter is the shot a listing leads on;
+# a wheel or a VIN plate is proof, not a poster.
+HERO_ORDER: tuple[str, ...] = ("hero", "front", "driver_side", "rear", "engine")
+
+# How safe each shot is to drop when trimming to a runtime cap. Higher is safer.
+# Proof shots go first: a buyer scrolling a listing wants the walkaround, and
+# the odometer is what they ask for once they are already interested.
+LOW_VALUE: dict[str, int] = {
+    "undercarriage": 5, "vin": 5, "odometer": 5, "size_chart": 5,
+    "cargo": 4, "rear_seats": 4,
+}
+
+# Without an exterior the film is an interior tour of a car nobody has seen.
+ESTABLISHING: tuple[str, ...] = ("hero", "front", "driver_side", "passenger_side")
+ESTABLISHING_ADVICE = (
+    "A walkaround with no exterior shot of the vehicle cannot establish what is "
+    "being sold; request a front three-quarter.")
+
+SIDECAR = "parts.json"
+UNIT, UNIT_PLURAL = "part", "parts"
+
 UNKNOWN = "other"
 
 

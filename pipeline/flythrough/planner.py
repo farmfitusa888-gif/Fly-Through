@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from . import moves as mv
+from . import taxonomy as tx
 from .rooms import Room, resolve
 from .viewpoint import assess, side_of
 
@@ -37,7 +38,11 @@ class Photo:
 
     @property
     def room(self) -> Room:
-        return resolve(self.room_key)
+        # Set by load_photos from the vertical's own taxonomy. It is an
+        # undeclared attribute deliberately: dataclasses.asdict only walks
+        # declared fields, so the resolved object never lands in the JSON.
+        # The fallback keeps Photos built by hand (tests, the CLI) working.
+        return getattr(self, "_resolved", None) or resolve(self.room_key)
 
 
 @dataclass
@@ -103,19 +108,22 @@ def _order_hint(stem: str) -> int:
     return int(m.group(1)) if m else 10_000
 
 
-def load_photos(folder: str | Path) -> list[Photo]:
+def load_photos(folder: str | Path, spec: tx.Spec | None = None) -> list[Photo]:
     """Read a photo folder into resolved Photo records.
 
-    The room label comes from the filename. If an agent supplies a sidecar
-    `rooms.json` mapping filename -> room, that wins, because an explicit label
-    from the person who was standing in the room beats any inference.
+    The label comes from the filename. If a sidecar mapping filename -> label
+    is present, that wins, because an explicit label from the person who was
+    standing there beats any inference. The sidecar is named per vertical --
+    rooms.json, parts.json, facets.json -- so the advice printed in a warning
+    is advice the reader can act on.
     """
+    spec = spec or tx.of("rooms")
     folder = Path(folder)
     if not folder.is_dir():
         raise NotADirectoryError(f"photo folder not found: {folder}")
 
     override: dict[str, str] = {}
-    sidecar = folder / "rooms.json"
+    sidecar = folder / spec.sidecar
     if sidecar.is_file():
         override = json.loads(sidecar.read_text())
 
@@ -129,18 +137,18 @@ def load_photos(folder: str | Path) -> list[Photo]:
     photos: list[Photo] = []
     for f in files:
         label = override.get(f.name, f.stem)
-        room = resolve(label)
-        photos.append(
-            Photo(
-                path=str(f),
-                label=label,
-                room_key=room.key,
-                rank=room.rank,
-                interior=room.interior,
-                order_hint=_order_hint(f.stem),
-                side=side_of(label, room.key),
-            )
+        room = spec.resolve(label)
+        photo = Photo(
+            path=str(f),
+            label=label,
+            room_key=room.key,
+            rank=room.rank,
+            interior=room.interior,
+            order_hint=_order_hint(f.stem),
+            side=side_of(label, room.key),
         )
+        photo._resolved = room
+        photos.append(photo)
     return photos
 
 
@@ -161,12 +169,13 @@ def order_photos(photos: list[Photo]) -> list[Photo]:
     return ordered
 
 
-def _audit(photos: list[Photo]) -> list[str]:
+def _audit(photos: list[Photo], spec: tx.Spec | None = None) -> list[str]:
     """Flag what will make the finished video weak, before spending on it."""
+    spec = spec or tx.of("rooms")
     warnings: list[str] = []
     present = {p.room_key for p in photos}
 
-    missing = [a for a in REQUIRED_ANCHORS if a not in present]
+    missing = [a for a in spec.required_anchors if a not in present]
     if missing:
         warnings.append(
             "Missing tour anchor(s): " + ", ".join(missing)
@@ -189,21 +198,23 @@ def _audit(photos: list[Photo]) -> list[str]:
     unknown = [p.label for p in photos if p.room_key == "other"]
     if unknown:
         warnings.append(
-            f"{len(unknown)} photo(s) had no recognisable room label "
+            f"{len(unknown)} photo(s) had no recognisable {spec.unit} label "
             f"({', '.join(unknown[:3])}{'...' if len(unknown) > 3 else ''}). "
-            "They are kept in input order; add a rooms.json to place them precisely."
+            f"They are kept in input order; add a {spec.sidecar} to place them "
+            "precisely."
         )
-    if "aerial" not in present and "exterior" not in present:
+    if not (set(spec.establishing) & present):
         warnings.append(
-            "No exterior or aerial photo. A property video with no establishing "
-            "shot of the building consistently underperforms; request one."
+            f"No establishing shot ({', '.join(spec.establishing)}). "
+            + spec.establishing_advice
         )
     return warnings
 
 
-def _pick_hero(photos: list[Photo]) -> str | None:
+def _pick_hero(photos: list[Photo], spec: tx.Spec | None = None) -> str | None:
     """Choose the thumbnail frame: the earliest hero-eligible exterior, else any."""
-    for want in ("aerial", "exterior", "living", "kitchen", "view"):
+    spec = spec or tx.of("rooms")
+    for want in spec.hero_order:
         for p in photos:
             if p.room_key == want:
                 return p.path
@@ -221,8 +232,15 @@ def build_plan(
     resolution: str = "1080p",
     aspect: str = "16:9",
     max_seconds: int | None = None,
+    vertical: str = "rooms",
 ) -> Plan:
     """Build a complete shot plan from a photo folder.
+
+    `vertical` selects the taxonomy: what the labels mean, what the prompt calls
+    the subject, which suppressions the negative bank carries, and whether
+    consecutive exteriors alternate orbit direction. It used to be absent, which
+    meant every vertical planned as a house -- a vehicle order rendered with
+    "camera orbits the house" and a negative bank that suppressed cars.
 
     max_seconds caps total runtime by dropping the lowest-value transitions
     (hallways and duplicate rooms first), never by truncating the tour, so the
@@ -230,26 +248,28 @@ def build_plan(
     """
     if style not in mv.STYLES:
         raise ValueError(f"unknown style {style!r}; choose from {sorted(mv.STYLES)}")
+    spec = tx.of(vertical)
 
-    photos = order_photos(load_photos(folder))
+    photos = order_photos(load_photos(folder, spec))
     plan = Plan(
         listing=listing,
         style=style,
         resolution=resolution,
         aspect=aspect,
         photos=photos,
-        warnings=_audit(photos),
-        hero_frame=_pick_hero(photos),
+        warnings=_audit(photos, spec),
+        hero_frame=_pick_hero(photos, spec),
     )
 
     if max_seconds is not None:
-        photos = _trim(photos, max_seconds)
+        photos = _trim(photos, max_seconds, spec)
         plan.photos = photos
     pairs = list(zip(photos, photos[1:]))
 
     style_text = mv.STYLES[style]
     for i, (a, b) in enumerate(pairs):
-        move = mv.select(a.room, b.room, index=i, total=len(pairs))
+        move = mv.select(a.room, b.room, index=i, total=len(pairs),
+                         alternate_orbit=spec.alternate_orbit)
         plan.shots.append(
             Shot(
                 index=i,
@@ -260,22 +280,29 @@ def build_plan(
                 end_frame=b.path,
                 from_room=a.room_key,
                 to_room=b.room_key,
-                prompt=mv.build_prompt(move, a.room, b.room, style=style_text),
-                negative_prompt=mv.negative_prompt(move),
+                prompt=mv.build_prompt(
+                    move, a.room, b.room, style=style_text,
+                    phrases=spec.phrases, subject=spec.subject,
+                    subject_noun=spec.subject_noun, preserve=spec.preserve),
+                negative_prompt=mv.negative_prompt(
+                    move, exterior_extra=spec.exterior_negative,
+                    interior_extra=spec.interior_negative),
             )
         )
     return plan
 
 
-def _runtime(photos: list[Photo]) -> int:
+def _runtime(photos: list[Photo], spec: tx.Spec | None = None) -> int:
     """Total seconds a photo chain will render to."""
+    spec = spec or tx.of("rooms")
     return sum(
-        mv.select(a.room, b.room, index=i, total=len(photos) - 1).seconds
+        mv.select(a.room, b.room, index=i, total=len(photos) - 1,
+                  alternate_orbit=spec.alternate_orbit).seconds
         for i, (a, b) in enumerate(zip(photos, photos[1:]))
     )
 
 
-def _drop_value(photos: list[Photo], i: int) -> int:
+def _drop_value(photos: list[Photo], i: int, spec: tx.Spec | None = None) -> int:
     """How safe photo i is to remove. 0 means never remove.
 
     Removing a photo re-links its neighbours, so the tour stays continuous --
@@ -284,16 +311,17 @@ def _drop_value(photos: list[Photo], i: int) -> int:
     and neither is any photo whose room is a required tour anchor when it is the
     only one of its kind.
     """
+    spec = spec or tx.of("rooms")
     if i == 0 or i == len(photos) - 1:
         return 0
     p = photos[i]
-    if p.room_key in REQUIRED_ANCHORS:
+    if p.room_key in spec.required_anchors:
         same = sum(1 for q in photos if q.room_key == p.room_key)
         if same == 1:
             return 0
         return 1
-    if p.room_key in {"hallway", "laundry", "garage", "bathroom"}:
-        return 5
+    if p.room_key in spec.low_value:
+        return spec.low_value[p.room_key]
     if p.room_key == "other":
         return 4
     # A duplicate of a room we already show elsewhere in the tour.
@@ -304,15 +332,17 @@ def _drop_value(photos: list[Photo], i: int) -> int:
     return 1
 
 
-def _trim(photos: list[Photo], max_seconds: int) -> list[Photo]:
+def _trim(photos: list[Photo], max_seconds: int,
+          spec: tx.Spec | None = None) -> list[Photo]:
     """Reduce the photo chain until it renders within max_seconds.
 
     Returns a contiguous chain -- every consecutive pair is still a real
     transition, so the finished video never jump-cuts between unrelated rooms.
     """
+    spec = spec or tx.of("rooms")
     kept = list(photos)
-    while len(kept) > 2 and _runtime(kept) > max_seconds:
-        ranked = [(_drop_value(kept, i), i) for i in range(len(kept))]
+    while len(kept) > 2 and _runtime(kept, spec) > max_seconds:
+        ranked = [(_drop_value(kept, i, spec), i) for i in range(len(kept))]
         value, idx = max(ranked)
         if value == 0:
             break                                   # nothing left safe to cut

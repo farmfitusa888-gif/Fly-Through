@@ -1255,3 +1255,103 @@ def test_articles_declare_a_canonical_url():
         pytest.skip("dist/ not built")
     for page in d.rglob("index.html"):
         assert 'rel="canonical"' in page.read_text(), page
+
+
+# --------------------------------------------------------------- verticals
+CAR_SHOOT = ["01_hero-three-quarter", "02_driver-side", "03_wheel",
+             "04_engine-bay", "05_dashboard", "06_front-seats", "07_vin-plate"]
+
+
+@pytest.fixture(scope="module")
+def car_photos(tmp_path_factory):
+    d = tmp_path_factory.mktemp("car")
+    for name in CAR_SHOOT:
+        subprocess.run(
+            ["ffmpeg", "-f", "lavfi", "-i", "color=c=gray:s=160x120:d=1",
+             "-frames:v", "1", str(d / f"{name}.jpg"), "-y", "-loglevel", "error"],
+            check=True)
+    return d
+
+
+def test_a_vehicle_plan_does_not_talk_about_a_house(car_photos):
+    """build_plan took no vertical, so every order planned as a property. A
+    real Ferrari order was rendering on "camera orbits the house counter-
+    clockwise", against anchors named living and kitchen, with a warning telling
+    the operator to add a rooms.json. All of it reached the render sheet reading
+    like the plan was correct."""
+    plan = build_plan(car_photos, listing="ZFF95NLA1P0290145",
+                      style="lot", vertical="vehicles")
+    blob = " ".join(s.prompt for s in plan.shots).lower()
+    for word in ("house", "property", "room", "architecture", "furniture"):
+        assert word not in blob, f"vehicle prompt still says {word!r}"
+    assert "vehicle" in blob
+    assert " ".join(plan.warnings).count("rooms.json") == 0
+
+
+def test_a_vehicle_negative_bank_does_not_delete_the_car(car_photos):
+    """moves.negative_prompt documents this exactly: "cars appearing, cars
+    disappearing" keeps a driveway stable in a property tour and deletes the
+    subject of a walkaround. The extras existed; nothing was passing them."""
+    plan = build_plan(car_photos, listing="VIN", style="lot", vertical="vehicles")
+    negs = " ".join(s.negative_prompt for s in plan.shots).lower()
+    assert "cars appearing" not in negs and "cars disappearing" not in negs
+    assert "roof shape changing" not in negs and "window count changing" not in negs
+    assert "duplicate car" in negs or "second vehicle" in negs
+
+
+def test_a_vehicle_plan_resolves_parts_not_rooms(car_photos):
+    """The labels are the taxonomy's, so "dashboard" is the dash and not an
+    unrecognised room dumped in input order."""
+    plan = build_plan(car_photos, listing="VIN", style="lot", vertical="vehicles")
+    keys = {p.room_key for p in plan.photos}
+    assert {"hero", "dash", "front_seats", "wheels", "engine"} <= keys
+    assert "other" not in keys
+
+
+def test_a_vehicle_walkaround_never_reverses_its_orbit(car_photos):
+    """One continuous circuit. Alternating direction reads as broken on an
+    object the viewer is tracking around, which is why vehicles sets
+    ALTERNATE_ORBIT False -- and why the flag has to reach moves.select."""
+    plan = build_plan(car_photos, listing="VIN", style="lot", vertical="vehicles")
+    assert "orbit_right" not in {s.move for s in plan.shots}
+
+
+def test_a_product_plan_preserves_a_product(tmp_path):
+    """products.py had no SUBJECT at all, so it inherited the room default and
+    asked the model to preserve the architecture of a handbag."""
+    for name in ["01_hero", "02_side-view", "03_material-detail", "04_in-use"]:
+        subprocess.run(
+            ["ffmpeg", "-f", "lavfi", "-i", "color=c=gray:s=160x120:d=1",
+             "-frames:v", "1", str(tmp_path / f"{name}.jpg"), "-y",
+             "-loglevel", "error"], check=True)
+    plan = build_plan(tmp_path, listing="Kettle", style="studio",
+                      vertical="products")
+    blob = " ".join(s.prompt for s in plan.shots).lower()
+    assert "the product" in blob and "architecture" not in blob
+
+
+def test_the_property_plan_is_unchanged_by_all_of_this(photos):
+    """rooms was the first vertical and still supplies every default. If
+    threading the taxonomy moved a single property prompt, the refactor broke
+    the thing that already works."""
+    plan = build_plan(photos, listing="Test House")
+    assert len(plan.shots) == 12
+    assert plan.shots[0].from_room == "street"
+    blob = " ".join(s.prompt for s in plan.shots).lower()
+    assert "the house" in blob and "vehicle" not in blob
+    negs = " ".join(s.negative_prompt for s in plan.shots).lower()
+    assert "cars appearing" in negs
+
+
+def test_every_vertical_names_its_own_subject_and_sidecar():
+    """A taxonomy that silently inherits room language is the bug this whole
+    module exists to prevent, and it is invisible until someone reads a prompt."""
+    from flythrough import taxonomy
+    seen_subject, seen_sidecar = set(), set()
+    for name in ("rooms", "vehicles", "products"):
+        s = taxonomy.of(name)
+        assert s.subject not in seen_subject, f"{name} inherits {s.subject!r}"
+        assert s.sidecar not in seen_sidecar, f"{name} inherits {s.sidecar!r}"
+        seen_subject.add(s.subject)
+        seen_sidecar.add(s.sidecar)
+        assert s.required_anchors and s.hero_order and s.establishing
