@@ -31,8 +31,8 @@ from urllib.parse import quote
 from fastapi import FastAPI, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, FileResponse
 
-from . import (auth, catalog_bridge as cat, notify, orders, payments,
-               render, reseller)
+from . import (auth, catalog_bridge as cat, limits, notify, orders,
+               outcomes, payments, render, reseller)
 from .config import Settings, load
 from .db import Database, new_id, now
 from .mail import Mailer
@@ -238,6 +238,16 @@ def create_app(settings: Settings | None = None, *, renderer=None,
 
         problems = ("".join(f"<li><span>{esc(x)}</span></li>" for x in ready.problems)
                     if ready.problems else "")
+
+        # The V3 loop, spent. Not a dashboard -- one sentence, at the only moment
+        # it can change a decision, and only when the evidence is strong enough
+        # to say out loud. best_advice() returns None far more often than not.
+        advice = ""
+        if o["vertical"] == "rooms":
+            line = outcomes.best_advice(db, "Daylight, golden hour or twilight")
+            if line:
+                advice = (f'<div class="card"><h3>From our delivered work</h3>'
+                          f'<p>{esc(line)}</p></div>')
         gate = (f'<form method="post" action="/order/{esc(order_id)}/checkout">'
                 f'{csrf_field(request)}<button>Pay {esc(money(o["price_cents"]))} →</button></form>'
                 if ready.ok else
@@ -264,7 +274,7 @@ def create_app(settings: Settings | None = None, *, renderer=None,
                f'<div class="card"><h3>Three questions</h3>'
                f'<form method="post" action="/order/{esc(order_id)}/brief">'
                f'{csrf_field(request)}{fields}<button>Save</button></form></div>'
-               f'{gate}')
+               f'{advice}{gate}')
             + (f'<div class="card"><h3>Status</h3><p>{status_pill(o["status"])}</p>'
                f'<p><a href="/orders">Your orders →</a></p></div>' if paid else ""))
         return render_page(request, "Your brief", body)
@@ -281,6 +291,10 @@ def create_app(settings: Settings | None = None, *, renderer=None,
         if o is None or o["status"] not in ("draft", "awaiting_payment"):
             return RedirectResponse(f"/order/{order_id}"
                                     "?err=This+order+is+already+paid", 303)
+        try:
+            limits.hit(db, "upload", order_id, limits.UPLOAD_PER_ORDER)
+        except limits.TooMany as e:
+            return RedirectResponse(f"/order/{order_id}?err={quote(str(e))}", 303)
         mod = render.TAXONOMY[o["vertical"]]
         added, errs = 0, []
         with db.tx() as c:
@@ -426,8 +440,15 @@ def create_app(settings: Settings | None = None, *, renderer=None,
     def login_send(request: Request, email: str = Form(...),
                    next: str = Form("/orders")):
         try:
+            # Both limits, and the address one first: without it anyone can post
+            # a stranger's address in a loop and have us mail-bomb someone who
+            # is not even a customer.
+            normalised = auth.normalise_email(email)
+            limits.hit(db, "login_email", normalised, limits.LOGIN_PER_EMAIL)
+            limits.hit(db, "login_ip", limits.client_ip(request),
+                       limits.LOGIN_PER_IP)
             token = auth.issue_login_token(db, email, ttl_s=s.login_link_ttl_s)
-        except auth.AuthError as e:
+        except (auth.AuthError, limits.TooMany) as e:
             return RedirectResponse(f"/login?err={quote(str(e))}", 303)
         url = f"{s.base_url}/auth?token={quote(token)}&next={quote(next)}"
         mailer.send(auth.normalise_email(email), f"Sign in to {s.brand}",
@@ -548,9 +569,11 @@ def create_app(settings: Settings | None = None, *, renderer=None,
     def partner_enrol(request: Request, name: str = Form(...),
                       email: str = Form(...)):
         try:
+            limits.hit(db, "enrol_ip", limits.client_ip(request),
+                       limits.ENROL_PER_IP)
             reseller.enrol(db, email, name.strip()[:80],
                            rate=s.commission_rate, lifetime=s.commission_lifetime)
-        except (reseller.ResellerError, auth.AuthError) as e:
+        except (reseller.ResellerError, auth.AuthError, limits.TooMany) as e:
             return RedirectResponse(f"/partner/join?err={quote(str(e))}", 303)
         token = auth.issue_login_token(db, email, ttl_s=s.login_link_ttl_s)
         mailer.send(auth.normalise_email(email), f"Your {s.brand} partner code",
@@ -606,6 +629,64 @@ def create_app(settings: Settings | None = None, *, renderer=None,
               f'<button class="btn ghost">Sign out</button></form>')
         return render_page(request, "Partner", body)
 
+    # ------------------------------------------------------------- outcomes
+    @app.get("/o/{order_id}", response_class=HTMLResponse)
+    def outcome_form(request: Request, order_id: str, done: str = ""):
+        """Answering must not require a login. A question that costs a sign-in
+        to answer is a question nobody answers, and the response rate IS the
+        value -- the order id in the emailed link is the credential, and it is
+        already unguessable."""
+        o = orders.get(db, order_id)
+        if o is None or o["status"] not in ("delivered", "refunded"):
+            return Response("Not found", status_code=404)
+        if done:
+            body = ('<h1>Thank you.</h1><p class="lede">That genuinely helps '
+                    '&mdash; it is what lets us tell the next person which way '
+                    'of cutting a film actually moves a listing.</p>')
+            return render_page(request, "Thank you", body, narrow=True)
+        sku = cat.skus().get(o["sku"])
+        body = (f'<p class="kicker">One question</p><h1>Did it sell?</h1>'
+                f'<p class="lede">About your {esc(sku.name if sku else o["sku"])}.'
+                f' A few words is plenty &mdash; sold, still listed, withdrawn, '
+                f'and roughly how long it took.</p>'
+                f'<form method="post" action="/o/{esc(order_id)}">'
+                f'<label>What happened?</label>'
+                f'<input name="reply" autocomplete="off" autofocus '
+                f'placeholder="sold in about 3 weeks">'
+                f'<button>Send</button></form>'
+                f'<p class="note">No account needed. We use it to work out which '
+                f'briefs sell faster, and everyone who answers gets the benefit '
+                f'of every other answer.</p>')
+        return render_page(request, "Did it sell?", body, narrow=True)
+
+    @app.post("/o/{order_id}")
+    def outcome_save(request: Request, order_id: str, reply: str = Form("")):
+        try:
+            limits.hit(db, "outcome", order_id, limits.Limit(5, 3600))
+            outcomes.record(db, order_id, reply)
+        except (outcomes.OutcomeError, limits.TooMany):
+            return Response("Not found", status_code=404)
+        return RedirectResponse(f"/o/{order_id}?done=1", 303)
+
+    @app.post("/admin/ask")
+    def admin_ask(request: Request, csrf: str = Form("")):
+        """Send the outstanding "did it sell?" asks. Operator-triggered rather
+        than a cron: the batch is small, it costs nothing to hold, and a human
+        pressing a button cannot mail two hundred people at 4am by accident."""
+        if not is_operator(request) or not check_csrf(request, csrf):
+            return Response("Not found", status_code=404)
+        sent = 0
+        for oid in outcomes.due(db):
+            o = orders.get(db, oid)
+            sku = cat.skus().get(o["sku"])
+            if notify.outcome_request(db, mailer, s, oid,
+                                      what=(sku.name if sku else o["sku"])):
+                outcomes.mark_asked(db, oid)
+                sent += 1
+        with db.tx() as c:
+            db.log(c, "outcome.asked_batch", "", str(sent))
+        return RedirectResponse("/admin/queue", 303)
+
     # ---------------------------------------------------------------- admin
     @app.get("/admin/queue", response_class=HTMLResponse)
     def admin_queue(request: Request):
@@ -622,9 +703,23 @@ def create_app(settings: Settings | None = None, *, renderer=None,
             f'<tr><td class="k">{esc(j["order_id"])}</td><td>{esc(j["sku"])}</td>'
             f'<td>{status_pill(j["status"])}</td><td>{j["attempts"]}</td>'
             f'<td class="note">{esc(j["error"][:80])}</td></tr>' for j in jobs)
+        summ = outcomes.summary(db)
+        pending = len(outcomes.due(db))
         body = (f'<h1>Queue</h1><p class="lede">{esc(worker.stats())}</p>'
                 f'<table><tr><th>Order</th><th>SKU</th><th>Job</th>'
-                f'<th>Tries</th><th>Error</th></tr>{rows}</table>')
+                f'<th>Tries</th><th>Error</th></tr>{rows}</table>'
+                f'<h2>Outcomes</h2>'
+                f'<div class="grid">'
+                f'<div class="stat"><div class="big">{summ["answered"]}</div>'
+                f'<div class="l">Answered</div></div>'
+                f'<div class="stat"><div class="big">'
+                f'{summ["response_rate"]:.0%}</div>'
+                f'<div class="l">Response rate</div></div>'
+                f'<div class="stat"><div class="big">{pending}</div>'
+                f'<div class="l">Ready to ask</div></div></div>'
+                f'<form method="post" action="/admin/ask">'
+                f'{csrf_field(request)}'
+                f'<button>Ask the {pending} due</button></form>')
         return render_page(request, "Queue", body)
 
     @app.get("/healthz")

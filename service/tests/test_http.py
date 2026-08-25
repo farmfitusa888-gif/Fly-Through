@@ -504,3 +504,129 @@ def test_a_bounced_notification_cannot_undo_a_delivery(tmp_path, monkeypatch):
 
     from flythrough_service import orders
     assert orders.get(app.state.db, oid)["status"] == "delivered"
+
+
+# ------------------------------------------------------------------- limits
+
+
+def test_login_cannot_be_used_to_mail_bomb_a_stranger(client, app):
+    """Without a per-address limit, anyone can post someone else's address in a
+    loop and have us mail them repeatedly — a way to get our sending domain
+    blocklisted using our own service, aimed at a person who is not a customer."""
+    from flythrough_service import limits
+    victim = "victim@example.com"
+    for _ in range(limits.LOGIN_PER_EMAIL.count):
+        client.post("/login", data={"email": victim}, follow_redirects=False)
+    r = client.post("/login", data={"email": victim}, follow_redirects=False)
+    assert "err=" in r.headers["location"]
+    sent = [m for m in app.state.mailer.outbox() if m.to == victim]
+    assert len(sent) == limits.LOGIN_PER_EMAIL.count
+
+
+def test_the_limit_is_per_address_not_global(client, app):
+    """One person hammering the form must not lock everyone else out."""
+    from flythrough_service import limits
+    for _ in range(limits.LOGIN_PER_EMAIL.count + 2):
+        client.post("/login", data={"email": "noisy@example.com"})
+    r = client.post("/login", data={"email": "quiet@example.com"},
+                    follow_redirects=False)
+    assert "err=" not in r.headers["location"]
+
+
+def test_partner_enrolment_is_rate_limited(client, app):
+    from flythrough_service import limits
+    for i in range(limits.ENROL_PER_IP.count):
+        client.post("/partner/join", data={"name": f"P{i}",
+                                           "email": f"p{i}@example.com"})
+    r = client.post("/partner/join",
+                    data={"name": "Spam", "email": "spam@example.com"},
+                    follow_redirects=False)
+    assert "err=" in r.headers["location"]
+
+
+def test_rate_rows_are_the_only_events_ever_deleted(client, app):
+    """Everything else in that table is the audit trail. Sweeping counters must
+    not touch it."""
+    from flythrough_service import limits
+    sign_in(client, app)
+    start_order(client)
+    with app.state.db.tx() as c:
+        before = c.execute("SELECT count(*) FROM events WHERE kind NOT LIKE 'rate.%'"
+                           ).fetchone()[0]
+    # -1, not 0: `at` has one-second granularity, so rows written this second
+    # are not yet "older than now" and a 0 window would leave them.
+    limits.sweep(app.state.db, older_than_s=-1)
+    with app.state.db.tx() as c:
+        after = c.execute("SELECT count(*) FROM events WHERE kind NOT LIKE 'rate.%'"
+                          ).fetchone()[0]
+        rates = c.execute("SELECT count(*) FROM events WHERE kind LIKE 'rate.%'"
+                          ).fetchone()[0]
+    assert after == before and before > 0
+    assert rates == 0
+
+
+def test_forwarded_for_uses_the_last_hop(app):
+    """Earlier entries are supplied by the client and are trivially forged."""
+    from flythrough_service import limits
+
+    class R:
+        headers = {"x-forwarded-for": "1.2.3.4, 9.9.9.9, 10.0.0.7"}
+        client = None
+    assert limits.client_ip(R()) == "10.0.0.7"
+
+
+# ------------------------------------------------------------ outcome loop
+
+
+def test_answering_did_it_sell_needs_no_login(client, app):
+    """A question that costs a sign-in to answer is a question nobody answers,
+    and the response rate is the entire value."""
+    from flythrough_service import orders
+    sign_in(client, app, "agent@example.com")
+    oid = start_order(client)
+    with app.state.db.tx() as c:
+        orders.transition(c, app.state.db, oid, "awaiting_payment")
+        orders.transition(c, app.state.db, oid, "paid")
+        orders.transition(c, app.state.db, oid, "rendering")
+        orders.transition(c, app.state.db, oid, "delivered")
+
+    client.cookies.clear()                      # signed out entirely
+    assert client.get(f"/o/{oid}").status_code == 200
+    r = client.post(f"/o/{oid}", data={"reply": "sold in about 3 weeks"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    with app.state.db.tx() as c:
+        row = c.execute("SELECT * FROM outcomes WHERE order_id=?", (oid,)).fetchone()
+    assert row["result"] == "sold" and row["days_to_sell"] == 21
+
+
+def test_an_undelivered_order_has_no_outcome_page(client, app):
+    sign_in(client, app)
+    oid = start_order(client)
+    assert client.get(f"/o/{oid}").status_code == 404
+
+
+def test_a_guessed_order_id_gets_nothing(client):
+    assert client.get("/o/ord_deadbeefdeadbeefdead").status_code == 404
+
+
+def test_outcome_answers_are_rate_limited(client, app):
+    from flythrough_service import orders
+    sign_in(client, app)
+    oid = start_order(client)
+    with app.state.db.tx() as c:
+        orders.transition(c, app.state.db, oid, "awaiting_payment")
+        orders.transition(c, app.state.db, oid, "paid")
+        orders.transition(c, app.state.db, oid, "rendering")
+        orders.transition(c, app.state.db, oid, "delivered")
+    client.cookies.clear()
+    for _ in range(5):
+        client.post(f"/o/{oid}", data={"reply": "sold"}, follow_redirects=False)
+    assert client.post(f"/o/{oid}", data={"reply": "sold"},
+                       follow_redirects=False).status_code == 404
+
+
+def test_only_an_operator_can_send_the_asks(app_with_operator):
+    c = TestClient(app_with_operator)
+    sign_in(c, app_with_operator, "buyer@example.com")
+    assert c.post("/admin/ask", data={"csrf": "x"}).status_code == 404

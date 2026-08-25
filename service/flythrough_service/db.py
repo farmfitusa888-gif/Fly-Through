@@ -124,6 +124,21 @@ CREATE TABLE IF NOT EXISTS commissions (
 );
 CREATE INDEX IF NOT EXISTS commissions_by_reseller ON commissions(reseller_id, status);
 
+-- What happened AFTER we delivered. The point of the whole business, and the
+-- one asset here a competitor cannot buy: after a couple of hundred rows, the
+-- brief that produces a faster sale is knowable rather than guessable.
+-- Nullable everywhere because most orders will never come back with an answer,
+-- and an unanswered order must not look like a failed one.
+CREATE TABLE IF NOT EXISTS outcomes (
+  order_id     TEXT PRIMARY KEY REFERENCES orders(id),
+  result       TEXT NOT NULL,          -- sold|listed|withdrawn|unknown
+  days_to_sell INTEGER,
+  note         TEXT NOT NULL DEFAULT '',
+  asked_at     INTEGER,
+  answered_at  INTEGER
+);
+CREATE INDEX IF NOT EXISTS outcomes_by_result ON outcomes(result);
+
 -- Append-only. Every state change money depends on leaves a row here.
 CREATE TABLE IF NOT EXISTS events (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,

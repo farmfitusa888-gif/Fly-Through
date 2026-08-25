@@ -104,9 +104,11 @@ def outcome_request(db: Database, mailer, settings, order_id: str, *,
     mailer.send(to, f"{settings.brand} — did it sell?",
                 f"One question about your {what}, and it genuinely helps: "
                 f"did it sell?\n\n"
-                f"Just reply with a word — sold, still listed, withdrawn — and "
-                f"roughly how long it took. We use it to work out which way of "
-                f"cutting a film actually moves a listing, and everyone who "
-                f"answers gets the benefit of everyone else's answers.\n\n"
-                f"Nothing else needed. Thank you.\n")
+                f"One click, no account needed:\n\n"
+                f"  {settings.base_url}/o/{order_id}\n\n"
+                f"Or just reply to this email with a word — sold, still listed, "
+                f"withdrawn — and roughly how long it took. We use it to work "
+                f"out which way of cutting a film actually moves a listing, and "
+                f"everyone who answers gets the benefit of everyone else's "
+                f"answers.\n\nThank you.\n")
     return True

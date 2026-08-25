@@ -614,3 +614,143 @@ def test_staging_copies_and_never_mutates_the_original(db, tmp_path):
     assert len(staged) == 1 and staged[0].name == "01_kitchen.jpg"
     assert staged[0].read_bytes() == src.read_bytes()
     assert src.exists()          # copied, not moved
+
+
+# --------------------------------------------------------------- outcomes
+
+
+from flythrough_service import outcomes as oc  # noqa: E402
+
+
+@pytest.mark.parametrize("reply,result,days", [
+    ("Sold! took about 3 weeks", "sold", 21),
+    ("under contract in 9 days", "sold", 9),
+    ("still listed", "listed", None),
+    ("nope, still on", "listed", None),
+    ("we withdrew it", "withdrawn", None),
+    ("cancelled", "withdrawn", None),
+    ("off market", "withdrawn", None),
+    ("dunno mate", "unknown", None),
+    ("no idea", "unknown", None),
+    ("", "unknown", None),
+])
+def test_replies_are_read_the_way_people_write_them(reply, result, days):
+    assert oc.parse(reply) == (result, days)
+
+
+def test_a_short_synonym_never_matches_inside_a_word():
+    """A bare "no" matched as a substring lit up inside "dunno" and recorded an
+    unparseable reply as a confident "still listed". Word boundaries, always."""
+    assert oc.parse("dunno")[0] == "unknown"
+    assert oc.parse("nothing happened")[0] == "unknown"
+    assert oc.parse("nope")[0] == "listed"
+
+
+def test_an_unparseable_reply_keeps_the_raw_text(db, customer):
+    """Evidence they engaged, and worth a human reading."""
+    o = orders.create(db, customer, "re-listing-pro")
+    oc.record(db, o, "it's complicated, call me")
+    with db.tx() as c:
+        row = c.execute("SELECT * FROM outcomes WHERE order_id=?", (o,)).fetchone()
+    assert row["result"] == "unknown" and "complicated" in row["note"]
+
+
+def test_only_delivered_orders_old_enough_are_due(db, customer):
+    from flythrough_service.db import now
+    fresh = orders.create(db, customer, "re-listing-pro")
+    old = orders.create(db, customer, "re-listing-pro")
+    undelivered = orders.create(db, customer, "re-listing-pro")
+    with db.tx() as c:
+        for o in (fresh, old, undelivered):
+            orders.transition(c, db, o, "awaiting_payment")
+            orders.transition(c, db, o, "paid")
+        for o in (fresh, old):
+            orders.transition(c, db, o, "rendering")
+            orders.transition(c, db, o, "delivered")
+        c.execute("UPDATE orders SET delivered_at=? WHERE id=?",
+                  (now() - 60 * 24 * 3600, old))
+    due = oc.due(db)
+    assert old in due
+    assert fresh not in due and undelivered not in due
+
+
+def test_we_never_ask_the_same_order_twice(db, customer):
+    from flythrough_service.db import now
+    o = orders.create(db, customer, "re-listing-pro")
+    with db.tx() as c:
+        orders.transition(c, db, o, "awaiting_payment")
+        orders.transition(c, db, o, "paid")
+        orders.transition(c, db, o, "rendering")
+        orders.transition(c, db, o, "delivered")
+        c.execute("UPDATE orders SET delivered_at=? WHERE id=?",
+                  (now() - 60 * 24 * 3600, o))
+    assert o in oc.due(db)
+    oc.mark_asked(db, o)
+    assert o not in oc.due(db)
+
+
+def _sold(db, customer, style, days):
+    from flythrough_service.db import now
+    import json as _j
+    o = orders.create(db, customer, "re-listing-pro")
+    with db.tx() as c:
+        c.execute("UPDATE orders SET brief=? WHERE id=?",
+                  (_j.dumps({"Daylight, golden hour or twilight": style}), o))
+        orders.transition(c, db, o, "awaiting_payment")
+        orders.transition(c, db, o, "paid")
+        orders.transition(c, db, o, "rendering")
+        orders.transition(c, db, o, "delivered")
+    oc.record(db, o, f"sold in {days} days")
+    return o
+
+
+def test_advice_says_nothing_until_there_is_enough_evidence(db, customer):
+    """A finding from four listings is a coincidence. Saying nothing is free;
+    saying something wrong costs the credibility the rest of this rests on."""
+    for _ in range(4):
+        _sold(db, customer, "golden hour", 10)
+        _sold(db, customer, "daylight", 60)
+    assert oc.best_advice(db, "Daylight") is None
+
+
+def test_advice_appears_once_both_groups_clear_the_floor(db, customer):
+    for _ in range(oc.MIN_SAMPLES):
+        _sold(db, customer, "golden hour", 12)
+        _sold(db, customer, "daylight", 45)
+    line = oc.best_advice(db, "Daylight")
+    assert line and "golden hour" in line.lower()
+    assert "33 days sooner" in line
+
+
+def test_a_small_difference_is_not_reported_as_a_finding(db, customer):
+    """Two days apart is noise, and dressing it as advice is how you get
+    ignored the first time it is wrong."""
+    for _ in range(oc.MIN_SAMPLES):
+        _sold(db, customer, "golden hour", 30)
+        _sold(db, customer, "daylight", 32)
+    assert oc.best_advice(db, "Daylight") is None
+
+
+def test_medians_not_means(db, customer):
+    """One listing that sat for two years would drag a mean somewhere useless
+    and make the advice confidently wrong."""
+    for _ in range(oc.MIN_SAMPLES - 1):
+        _sold(db, customer, "twilight", 10)
+    _sold(db, customer, "twilight", 700)
+    got = [i for i in oc.by_dimension(db, "Daylight") if i.value == "twilight"][0]
+    assert got.median_days == 10
+
+
+def test_outcome_summary_counts_only_answers(db, customer):
+    from flythrough_service.db import now
+    o = orders.create(db, customer, "re-listing-pro")
+    with db.tx() as c:
+        orders.transition(c, db, o, "awaiting_payment")
+        orders.transition(c, db, o, "paid")
+        orders.transition(c, db, o, "rendering")
+        orders.transition(c, db, o, "delivered")
+    oc.mark_asked(db, o)
+    assert oc.summary(db)["answered"] == 0
+    oc.record(db, o, "sold in 14 days")
+    s = oc.summary(db)
+    assert s["answered"] == 1 and s["asked"] == 1 and s["response_rate"] == 1.0
