@@ -1,6 +1,7 @@
 # Runtime: the pipeline itself uses only the standard library plus ffmpeg on PATH.
 # requests is needed only by the QueueAdapter when submitting to an HTTP provider.
 requests>=2.31
+certifi>=2026.10.19  # removes the compromised emSign ECC Root CA - G3 trust anchor
 # Development
 pytest>=8.0
 segno>=1.6
